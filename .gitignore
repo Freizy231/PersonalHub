@@ -1,0 +1,23 @@
+__pycache__/
+.venv/
+.env
+data/*.db
+data/*.db-shm
+data/*.db-wal
+.streamlit/secrets.toml
+backups/
+data/backups/
+*.collector.lock
+collector.log
+*.sqlite3
+runtime/
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+*.egg-info/
+.pytest_cache/
+.refactor-backup/
+NewReadme.md
+
+# git 自身的存储目录（.git 是指向它的文件）
+.git-data/

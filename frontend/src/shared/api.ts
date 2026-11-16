@@ -1,0 +1,237 @@
+let csrfToken = ''
+
+const messages: Record<string, string> = {
+  AI_CAPACITY:'AI 请求过多，请稍后重试。',
+  AI_RESPONSE_INVALID:'模型返回的内容无法使用，本次未保存任何结果。',
+  AI_SECRET_UNSAFE:'密钥文件权限或类型异常，已拒绝读取；请在设置中重新绑定。',
+  BLOB_FILE_CONFLICT:'文献文件内容与记录不一致，未读取。请核对备份。',
+  BLOB_FILE_MISSING:'文献原件缺失。原记录已保留，请核对备份。',
+  BLOB_FILE_UNSAFE:'文献文件类型、权限或大小异常，已拒绝读取。',
+  BLOB_PATH_UNSAFE:'文献存储路径异常，已停止操作。',
+  BLOB_REFERENCE_INVALID:'文献引用不一致，请重新读取后核对。',
+  COLLECTION_MEMBERS_INVALID:'集合成员重复或包含自身，未保存。',
+  COLLECTION_NESTING_UNSUPPORTED:'暂不支持把集合放进另一个集合。',
+  COLLECTION_NOT_FOUND:'集合不存在或当前不可访问。',
+  COLLECTION_STATE_CONFLICT:'集合状态已变化，请重新读取核对。',
+  COLLECTOR_ITEM_LIMIT:'本次采集条目超出本版上限，未保存。',
+  COLLECTOR_PAYLOAD_INVALID:'采集返回格式不符合预期，已记录为失败，不重试。',
+  COLLECTOR_URL_INVALID:'来源地址无效或不是公开地址。',
+  DOCUMENT_NOT_FOUND:'文献不存在或当前不可访问。',
+  DOCUMENT_STATE_CONFLICT:'文献状态已变化，请刷新核对。',
+  FEED_FORMAT_UNSUPPORTED:'订阅源格式不受支持，仅接受 RSS 或 Atom。',
+  FEED_XML_INVALID:'订阅源 XML 无法解析。',
+  FEED_XML_UNSAFE:'订阅源包含被禁止的实体或声明，已拒绝解析。',
+  FILE_INTEGRITY_INVALID:'文件完整性校验未通过，未读取内容。',
+  INTERNAL_ERROR:'操作失败，请记下错误编号并查看本机日志。',
+  LEARNING_TREE_INVALID:'知识点层级数据异常，请重新读取后核对。',
+  LEARNING_TREE_TOO_DEEP:'知识点层级过深，未保存。',
+  LEGACY_IMPORT_LIMIT:'旧情报数据超出单次导入上限，未导入。',
+  LEGACY_RELATION_INVALID:'旧情报数据的关联不一致，整批未导入。',
+  MILESTONE_NOT_FOUND:'里程碑不存在或当前不可访问。',
+  MILESTONE_STATE_CONFLICT:'里程碑状态已变化，请刷新核对。',
+  NOTE_REFERENCE_INVALID:'笔记引用不一致，请重新读取后核对。',
+  NOTE_SNAPSHOT_CHANGED:'备份期间笔记文件发生变化，未生成快照。',
+  NOTE_SNAPSHOT_INCOMPLETE:'笔记快照不完整，已放弃本次备份。',
+  NOTE_SNAPSHOT_INVALID:'笔记快照格式无效，已拒绝恢复。',
+  NOT_FOUND:'请求的内容不存在。',
+  ORIGIN_REQUIRED:'该操作需要从本机入口发起。',
+  OUTBOUND_HTTP_FAILED:'外部服务返回错误状态，本次未保存数据。',
+  OUTBOUND_RATE_LIMITED:'外部服务限制了访问频率，请稍后重试。',
+  OUTBOUND_RESPONSE_LIMIT:'外部响应超过大小上限，已中止。',
+  PDF_CANCELLED:'文献提取已取消。',
+  PDF_EXTRACTOR_UNAVAILABLE:'本机缺少可用的 PDF 提取工具。',
+  PDF_INVALID:'文件内容不是有效的 PDF。',
+  PDF_PAGE_BUDGET:'PDF 页数超过本版上限。',
+  PDF_PASSWORD_REQUIRED:'文件已加密，请在外部阅读器解锁后另存副本再导入。',
+  PDF_RESOURCE_BUDGET:'PDF 解析超出本版资源上限。',
+  PDF_SANDBOX_UNAVAILABLE:'本机沙箱不可用，已拒绝解析该文件。',
+  PDF_TEXT_BUDGET:'提取文本超过大小上限。',
+  PRIVATE_PATH_REQUIRED:'数据目录权限不符合要求，请检查目录权限。',
+  PROJECT_MILESTONE_LIMIT:'单个项目里程碑数量已达上限。',
+  PROJECT_NOT_FOUND:'项目不存在或当前不可访问。',
+  PROJECT_STATE_CONFLICT:'项目状态已变化，请重新读取核对。',
+  READER_NOT_FOUND:'阅读器配置不存在或已停用。',
+  READER_PREVIEW_NOT_FOUND:'阅读器启动预览已失效，请重新预览。',
+  RELATION_INVALID:'关联类型与资料类型不匹配。',
+  RELATION_NOT_FOUND:'关联不存在或已解除。',
+  RESOURCE_STATE_CONFLICT:'资料状态已变化，请刷新核对。',
+  TASK_ALREADY_ASSIGNED:'该任务已属于其他项目，请先在原项目解除归属。',
+  UNSAFE_BACKUP_OUTPUT:'备份输出目录不安全，请使用全新的空目录。',
+  VAULT_REQUEST_TOO_LARGE:'私密请求超过大小限制，请减少内容。',
+  MONTH_INVALID:'月份无效，请选择公历1至9999年的有效月份。',
+  FINANCE_AMOUNT_INVALID:'金额无效：使用正数十进制文本；CNY/USD/EUR最多两位小数，JPY为整数。预算允许0。',
+  FINANCE_IMPORT_CONFLICT:'导入身份或内容与现有账本冲突，整批未写入；不会覆盖已有记录。',
+  CATEGORY_EXISTS:'同类型分类已存在，请复用或改名。',
+  CATEGORY_DIRECTION_IMMUTABLE:'已有分类的收支类型不可更改，请创建另一分类。',
+  BUDGET_EXISTS:'该月、分类与币种已有预算，请编辑现有预算。',
+  BUDGET_EXPENSE_REQUIRED:'预算只用于支出分类。',
+  LOCAL_RECORD_NOT_FOUND:'记录不存在或不可访问，请重新读取核对。',
+  LOCAL_RECORD_STATE_CONFLICT:'这条记录的状态已变化（可能已在回收站或已恢复），请刷新后核对。',
+  PURGE_NOT_TRASHED:'只有已经在回收站里的内容才能永久删除。',
+  PURGE_BLOCKED:'还有其他内容在引用它，暂时不能永久删除；请先解除关联。',
+  PURGE_UNSUPPORTED:'这类内容暂不支持永久删除，可以保留在回收站里。',
+  LOCAL_CAPACITY:'已达到当前数量上限，请先整理或导出。',
+  EXERCISE_MONTH_CAPACITY:'本月超过1000项，请使用完整备份或单独导出核对。',
+  EXERCISE_LINK_INVALID:'任务或日程类型不匹配，请在原页面核对。',
+  SOURCE_DISABLED:'采集来源未启用或不存在，请先配置。',
+  COLLECTOR_BUSY:'已有采集正在进行，请等待完成；中断任务会在重启后标记。',
+  COLLECTOR_COOLDOWN:'该来源距离上次采集不足60秒，请稍后再试。',
+  SOURCE_KIND_IMMUTABLE:'不能更改来源类型，请登记另一来源。',
+  SUBSCRIPTION_EXISTS:'关键词已存在，请编辑已有订阅。',
+  LEGACY_UNAVAILABLE:'原情报数据库不可用，未创建替代库。',
+  OUTBOUND_URL_INVALID:'仅支持公开 HTTPS 地址、443端口，不能含账号密码或片段。',
+  OUTBOUND_ADDRESS_DENIED:'目标地址不是公开网络地址，已阻止连接。',
+  OUTBOUND_UNAVAILABLE:'外部服务连接失败或超时。不会自动重发模型请求。',
+  AI_CONFIG_INVALID:'API 配置无效；地址不能含查询参数，密钥请只填写在密钥栏。',
+  AI_DISABLED:'AI 尚未启用或凭据缺失，请在设置中配置；其他功能仍可使用。',
+  AI_CREDENTIAL_REQUIRED:'请输入 API 密钥，或关闭助手；恢复备份后需重新绑定凭据。',
+  AI_ENDPOINT_REBIND_REQUIRED:'更换请求地址必须重新输入密钥，避免把原密钥发送到另一服务。',
+  AI_PREVIEW_EXPIRED:'发送预览已过期、资料或配置已变化，请重新预览。',
+  AI_RESULT_UNAVAILABLE:'来源版本或可见性已变化，临时回答不再展示。',
+  AI_SCOPE_DENIED:'所选资料不在允许的只读范围内。',
+  AI_CONTEXT_LIMIT:'最多8项资料、每项6000字符、合计24000字符，请缩小范围。',
+  AI_BUSY:'已有模型请求进行中，请等待或取消。',
+
+  STOCK_NOT_FOUND:'库存记录不存在，可能已被删除，请重新读取。',
+  DIET_DATE_RANGE: '日期超出可完整显示一周的范围。',
+  DIET_SUGGESTION_LIMIT: '本周超过500种食材与单位组合，请精简菜单或手动维护购物项。',
+  DIET_MONDAY_REQUIRED: '请选择周一作为一周的开始。',
+  INGREDIENT_NAME_EXISTS: '该食材名称已登记，请查找并复用；未合并现有食材。',
+  INGREDIENT_NOT_FOUND: '食材不存在，请重新读取后选择。',
+  RECIPE_NOT_FOUND: '食谱不存在或不可访问，请重新读取。',
+  MEAL_NOT_FOUND: '三餐安排不存在或已移除，请重新读取。',
+  SHOPPING_ITEM_NOT_FOUND: '购物项不存在或已移除，请重新读取。',
+  DIET_PREVIEW_STALE: '菜单、食谱、食材、库存或购物清单已变化，请重新预览采购建议。',
+  DIET_STATE_CONFLICT: '饮食记录状态已变化，请重新读取核对。',
+  DIET_MEAL_LIMIT: '每日最多30道安排，请先整理当天菜单。',
+  DIET_RECORD_LIMIT: '本版记录数量已达上限，请先整理或导出。',
+  DIET_QUANTITY_LIMIT: '汇总数量超过本版上限，未追加任何购物项。',
+  RESOURCE_NOT_FOUND: '资料不存在、已删除或当前不可访问。',
+  EPUB_INVALID:'文件不是有效的 EPUB 压缩包。',
+  EPUB_UNSAFE:'EPUB 内部路径不安全，已拒绝解析。',
+  EPUB_ENCRYPTED:'EPUB 已加密，请先移除 DRM 后另存副本再导入。',
+  EPUB_XML_UNSAFE:'EPUB 内部包含被禁止的 XML 声明，已拒绝解析。',
+  EPUB_RESOURCE_BUDGET:'EPUB 条目过多、单条目过大或压缩比异常，已拒绝解析。',
+  EPUB_TEXT_BUDGET:'EPUB 提取文本超过大小上限。',
+  PDF_TOO_LARGE: '文件超过 100 MiB 上限，请在本机拆分后重试。',
+  PDF_SIGNATURE_INVALID: '文件内容不是受支持的 PDF 或 EPUB，未创建文献。',
+  PDF_FILENAME_INVALID: '文件名无效，请使用普通 PDF 或 EPUB 文件名。',
+  PDF_DUPLICATE_IN_TRASH: '这份文献已在回收站，请恢复原记录。',
+  PDF_IMPORT_UNAVAILABLE: '本次导入暂不可用，未返回其他资料的信息。',
+  PDF_JOB_ACTIVE: '已有提取任务正在运行，请先等待或取消。',
+  PDF_PAGE_INVALID: '页码超出范围或总页数尚未提取成功。',
+  EXPORT_TOO_LARGE: '普通导出超过 256 MiB，请使用设置中的完整备份命令。',
+  LEARNING_EVIDENCE_REQUIRED: '已验收需要明确标准，以及完成的练习任务或非空成果笔记作为证据。',
+  LEARNING_CYCLE: '上级知识点会形成循环，未保存。',
+  LEARNING_PARENT_PATH_MISMATCH: '上级知识点必须属于同一学习路线。',
+  LEARNING_PATH_MOVE_UNSUPPORTED: '暂不支持跨路线移动知识点，请在原路线调整。',
+  LEARNING_HAS_ACTIVE_CHILDREN: '请先处理活动子项，再将目标、路线或知识点移入回收站。',
+  READER_UNAVAILABLE: '阅读器不存在、未安装或文件权限不安全。',
+  READER_PREVIEW_EXPIRED: '预览已过期或资料发生变化，请重新预览。',
+  REQUEST_TOO_LARGE: '请求超过本版大小限制，请减少内容。',
+  RESOURCE_TAGS_NOT_FOUND: '资料不存在、已删除或当前不可访问，请重新读取核对。',
+  TAG_NOT_FOUND: '标签不存在或当前不可访问，请重新读取核对。',
+  TAG_NAME_CONFLICT: '该名称已被另一标签使用，未合并或覆盖。请修改名称。',
+  TAG_NAME_RESERVED: '该名称已保留，暂不能使用；原标签未被覆盖。',
+  TAG_QUERY_INVALID: '请输入有效的普通标签名称。',
+  TAG_REQUEST_TOO_LARGE: '标签请求超过大小限制，请减少内容。',
+  DASHBOARD_CONFIG_INVALID: '首页配置异常，原配置已保留；请停止服务并核对备份，暂不允许覆盖。',
+  DASHBOARD_REQUEST_TOO_LARGE: '首页设置超过大小限制，请减少快捷入口。',
+  VAULT_LOCKED: '私密库已锁定，私密草稿已清空，请重新解锁。',
+  VAULT_BUSY: '私密库已在当前或另一进程解锁，请先锁定后再试。',
+  VAULT_EXISTS: '私密库已存在，未覆盖。请使用解锁。',
+  VAULT_UNLOCK_FAILED: '密码错误或加密容器损坏，无法解锁。请核对对应备份与密码。',
+  VAULT_RATE_LIMIT: '解锁尝试过于频繁，请稍后重试。',
+  VAULT_CAPACITY: '私密库达到本版容量限制，原有内容已保留，请先进行完整备份。',
+  VAULT_CHANGED: '私密容器在外部发生变化，已锁定且未覆盖。',
+  VAULT_FILE_UNSAFE: '私密文件路径、权限或类型异常，已拒绝访问。',
+  VAULT_NOT_INITIALIZED: '私密库文件不存在，请核对数据目录和备份，未创建替代库。',
+  VAULT_RECOVERY_REQUIRED: '发现私密恢复文件但缺少活动容器。请保全目录并核对备份。',
+  SESSION_REQUIRED: '本机访问会话已结束，请重新打开本机启动入口。',
+  BOOTSTRAP_INVALID: '启动入口已使用或失效，请重新启动应用后打开新的入口。',
+  ORIGIN_DENIED: '访问来源不受信任。请使用本机地址打开。',
+  DATABASE_UPGRADE_REQUIRED: '数据库需要升级。请先停止新服务，运行升级命令后重启。',
+  DATABASE_NOT_INITIALIZED: '个人数据库尚未初始化，未创建空白替代库。',
+  DATABASE_UNAVAILABLE: '本地数据库暂不可用，请稍后重试。',
+  EVENT_NOT_FOUND: '日程不存在、已删除或当前不可访问。',
+  EVENT_INTERVAL_INVALID: '请检查全天日期或开始与结束时间。',
+  EVENT_STATE_CONFLICT: '日程状态已变化，请刷新核对。',
+  CALENDAR_RANGE_INVALID: '日历日期范围或时区不正确。',
+  REMINDER_NOT_FOUND: '提醒不存在或当前不可访问。',
+  REMINDER_TARGET_UNAVAILABLE: '目标已完成、取消、删除或不可访问，不能设置提醒。',
+  REMINDER_STATE_CONFLICT: '提醒状态已变化，请刷新核对。',
+  NOTE_NOT_FOUND: '笔记不存在、已删除或不可访问。',
+  NOTE_FILE_MISSING: '笔记文件缺失。原记录已保留，请先核对备份或另存草稿。',
+  NOTE_FILE_CONFLICT: '笔记文件在外部发生变化，未覆盖。请核对磁盘文件，或将草稿另存新笔记。',
+  NOTE_HASH_CONFLICT: '正文版本已变化，未覆盖；请核对最新内容。',
+  NOTE_FILE_UNSAFE: '笔记文件类型、权限或大小异常，已拒绝读取。',
+  NOTE_PATH_UNSAFE: '笔记存储路径异常，已停止操作。',
+  NOTE_FILES_BUSY: '另一项笔记操作正在进行，请保留草稿稍后重试。',
+  NOTE_STATE_CONFLICT: '笔记状态已变化，请刷新核对。',
+  NOTE_EXPORT_TOO_LARGE: '笔记导出超过单次64 MiB限制，请使用完整备份或逐项下载。',
+  PROJECT_ARCHIVED: '项目已归档，请先重新启用项目。',
+  PROJECT_DIRECTORY_REQUIRED: '请先登记本地项目目录。',
+  PROJECT_DIRECTORY_UNAVAILABLE: '项目目录不存在、不可访问或包含符号链接。',
+  TOOL_UNSAFE_PATH: '目录或程序权限不符合要求，请核对所有者和写权限。',
+  TOOL_UNAVAILABLE: '程序当前不可用，不会自动安装或替换。',
+  TOOL_INSTALLATION_CHANGED: '程序已更新、移动或不可用，请在设置中重新绑定。',
+  TOOL_PROFILE_NOT_FOUND: '工具配置不存在，请重新读取。',
+  TOOL_PROFILE_DISABLED: '工具已停用，请先在设置中启用。',
+  TOOL_PROFILE_EXISTS: '该类工具已登记，请编辑现有配置。',
+  TOOL_ADAPTER_IMMUTABLE: '不能更改已有配置的应用类型。',
+  TOOL_PREVIEW_NOT_FOUND: '启动预览不存在，请重新预览。',
+  TOOL_PREVIEW_EXPIRED: '预览已过期或项目/工具已变化，请关闭并重新预览。',
+  TOOL_PREVIEW_CHANGED: '项目目录或程序已变化，已阻止启动，请重新预览。',
+  VERSION_CONFLICT: '此记录已在其他页面修改。你的修改未覆盖新内容，请刷新核对后重试。',
+  TASK_STATE_CONFLICT: '任务状态已变化，请刷新列表核对。',
+  TASK_NOT_FOUND: '任务不存在、已移入回收站或当前不可访问。',
+  IDEMPOTENCY_CONFLICT: '重复提交的内容发生变化，请刷新核对原任务。',
+  IDEMPOTENCY_RESULT_TRASHED: '这次创建已成功，但记录后来进入了回收站。请到回收站核对。',
+  DEADLINE_CONFLICT: '截止日期与精确截止时间只能保留一个。',
+  VALIDATION_ERROR: '输入格式不正确，请检查名称、日期、时间和其他必填字段。',
+  CSRF_INVALID: '操作凭据已失效，请刷新页面后重试。',
+}
+
+export class ApiError extends Error {
+  constructor(public code: string, public status: number) { super(messages[code] || '操作未完成，请重试。') }
+}
+
+async function request(path: string, options: RequestInit = {}): Promise<Response> {
+  let response: Response
+  try {
+    response = await fetch('/api/v1' + path, {
+      ...options, credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken, ...options.headers },
+    })
+  } catch { throw new Error('暂时无法连接本机服务，请检查应用是否正在运行。') }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new ApiError(body.code || 'UNKNOWN_ERROR', response.status)
+  }
+  return response
+}
+
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  return (await request(path,options)).json() as Promise<T>
+}
+export async function apiBlob(path: string): Promise<Blob> {
+  return (await request(path)).blob()
+}
+
+export async function connectSession(token?: string) {
+  const result = token
+    ? await api<{ csrf_token: string }>('/session/exchange', { method: 'POST', body: JSON.stringify({ token }) })
+    : await api<{ csrf_token: string }>('/session')
+  csrfToken = result.csrf_token
+}
+
+export interface SystemState {
+  version: string
+  phase: number
+  database: 'ready' | 'upgrade_required' | 'not_initialized' | 'version_mismatch' | 'unavailable'
+  ai: string
+  legacy_intelligence: string
+  private_vault: string
+  backup_scope: string
+  reminders: string
+}

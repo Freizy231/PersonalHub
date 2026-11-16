@@ -1,0 +1,9 @@
+# Independent Personal Hub environment; never install into the legacy .venv.
+# Resolve only from the official Python package index, then freeze requirements.lock.
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+SQLAlchemy>=2.0,<2.1
+alembic>=1.14,<2
+httpx>=0.28,<1
+# Dedicated encrypted vault; does not affect the legacy environment.
+cryptography==46.0.3
