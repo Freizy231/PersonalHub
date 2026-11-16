@@ -75,3 +75,44 @@ test('the command palette lists page commands and searches resources after two c
   assert.ok(options().some(n => /PE 导入表笔记/.test(require('./harness.cjs').text(n))), 'a matching resource is offered')
   view.app.unmount()
 })
+
+test('a confirmation raised from inside a form is stacked above that form', async () => {
+  // Equal z-index would let the form cover the confirmation it raised, which reads as
+  // "the dialog will not close": the only visible button clicks through to the form.
+  const confirmModule = load('shared/confirm.ts', {})
+  const { text: readText } = require('./harness.cjs')
+
+  const host = mountComponent('shared/ConfirmHost.vue'); await flush()
+  const form = mountComponent('shared/HubDialog.vue', { show: true, title: '记一笔' }); await flush()
+
+  const overlays = () => globalThis.__hubBody.children.filter(n => String(n.props?.class || '').includes('hub-overlay'))
+  const depthOf = n => {
+    const style = n.props?.style
+    const raw = typeof style === 'string' ? style : Object.entries(style || {}).map(([k, v]) => `${k}:${v}`).join(';')
+    const match = /z-?index\s*:\s*(\d+)/i.exec(raw)
+    return match ? Number(match[1]) : null
+  }
+
+  assert.equal(overlays().length, 1, 'the form dialog is open')
+  const formOverlay = overlays()[0]
+  const formDepth = depthOf(formOverlay)
+  assert.ok(formDepth >= 60, 'a lone dialog sits at the base of the dialog band')
+
+  const answer = confirmModule.confirmAction('草稿将被丢弃，且无法恢复。')
+  await flush()
+  assert.equal(overlays().length, 2, 'the confirmation is rendered as well as the form')
+  const confirmOverlay = overlays().find(n => readText(n).includes('草稿将被丢弃'))
+  const other = overlays().find(n => n !== confirmOverlay)
+  assert.ok(confirmOverlay && other)
+  assert.ok(depthOf(confirmOverlay) > depthOf(other), 'the confirmation must paint over the form that raised it')
+
+  confirmModule.pendingConfirm.value.resolve(false)
+  assert.equal(await answer, false)
+  await flush()
+  assert.equal(overlays().length, 1, 'answering removes only the confirmation')
+  assert.equal(depthOf(overlays()[0]), formDepth, 'the form returns to its former depth')
+
+  form.app.unmount(); host.app.unmount()
+  assert.equal(overlays().length, 0)
+  assert.equal(globalThis.document.body.style.overflow, '', 'the page scroll is released once every dialog is gone')
+})

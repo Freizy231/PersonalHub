@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import HubButton from './HubButton.vue'
+import { dialogStack, enterDialog } from './layer'
 
 const props = withDefaults(defineProps<{
   show: boolean
@@ -22,6 +23,12 @@ const emit = defineEmits<{
 
 const panel = ref<HTMLElement>()
 let previousFocus: HTMLElement | null = null
+let layer: ReturnType<typeof enterDialog> | null = null
+// How many dialogs were already open when this one appeared. A confirmation raised
+// from inside a form must sit above that form, not tie with it.
+const stackDepth = ref(0)
+
+watch(dialogStack, () => { if (layer) stackDepth.value = layer.depth() })
 
 function close() {
   if (props.busy) return
@@ -61,23 +68,37 @@ function onKeydown(event: KeyboardEvent) {
 watch(() => props.show, async (open) => {
   if (open) {
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    document.body.style.overflow = 'hidden'
+    layer = enterDialog()
+    stackDepth.value = layer.depth()
     await nextTick()
     const target = panel.value?.querySelector<HTMLElement>('[autofocus], input, textarea, select') || panel.value
     target?.focus()
   } else {
-    document.body.style.overflow = ''
+    layer?.leave()
+    layer = null
+    stackDepth.value = 0
     previousFocus?.focus()
     previousFocus = null
   }
-})
+  // A dialog mounted already open must register too: otherwise it never joins the
+  // stack, never freezes the page and never takes focus.
+}, { immediate: true })
 
-onBeforeUnmount(() => { document.body.style.overflow = '' })
+onBeforeUnmount(() => {
+  layer?.leave()
+  layer = null
+})
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="hub-overlay" @mousedown.self="close" @keydown="onKeydown">
+    <div
+      v-if="show"
+      class="hub-overlay"
+      :style="{ zIndex: 60 + stackDepth }"
+      @mousedown.self="close"
+      @keydown="onKeydown"
+    >
       <div
         ref="panel"
         class="hub-dialog"
@@ -109,6 +130,7 @@ onBeforeUnmount(() => { document.body.style.overflow = '' })
 .hub-overlay {
   position: fixed;
   inset: 0;
+  /* Stack position is inline (open order); this is the base of the dialog band. */
   z-index: 60;
   display: flex;
   align-items: flex-start;
