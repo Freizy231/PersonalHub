@@ -6,6 +6,7 @@ from pydantic import BaseModel,ConfigDict,Field
 from ...core.security import require_session
 from .service import KnowledgeService
 from .purge import PurgeService
+from .stalled import StalledService
 router=APIRouter(prefix='/api/v1',dependencies=[Depends(require_session)])
 class Version(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -62,3 +63,10 @@ async def purge_preview(rid: UUID, request: Request):
 @router.post('/trash/{rid}/purge')
 async def purge(rid: UUID, payload: Version, request: Request, idempotency_key: UUID = Header()):
     return await asyncio.to_thread(purge_service(request).purge, str(rid), payload.expected_version)
+
+
+@router.get('/stalled')
+async def stalled(request: Request, threshold_days: int | None = Query(None, ge=0, le=3650),
+                  limit: int = Query(200, ge=1, le=500)):
+    return await asyncio.to_thread(StalledService(request.app.state.settings.database).report,
+                                   threshold_days, limit)

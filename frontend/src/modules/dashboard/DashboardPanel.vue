@@ -10,6 +10,7 @@ import TodayMeals from '../life/diet/TodayMeals.vue'
 import StudyWidget from './StudyWidget.vue'
 import IntelWidget from '../intelligence/IntelWidget.vue'
 import TodayStrip from './TodayStrip.vue'
+import StalledWidget from './StalledWidget.vue'
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -201,6 +202,11 @@ watch(() => props.enabled, value => { if (value) void load() })
         </div>
       </div>
       <p v-if="!visible.length" class="empty-state">首页暂未启用组件。可在设置中开启。</p>
+
+      <!-- 回顾性内容放在“今天”之后：先看要做什么，再看有什么被落下了。 -->
+      <section class="dashboard-widget stalled-section">
+        <StalledWidget :enabled="enabled" />
+      </section>
     </template>
 
     <!-- settings view -->
@@ -270,4 +276,5 @@ export default {}
 .widget-settings .checkbox-field { margin: 0; }
 .widget-order { display: flex; gap: var(--space-1); }
 .widget-order .plain-action { padding: 0 6px; font-size: var(--step-1); }
+.stalled-section { margin-top: var(--space-4); }
 </style>

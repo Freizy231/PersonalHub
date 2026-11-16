@@ -69,3 +69,43 @@ test('reset only changes the draft and cancel leaves committed settings untouche
   assert.equal(view.anyButton('保存布局'), undefined, 'leaving edit mode discards the draft')
   view.app.unmount()
 })
+
+test('the stalled view lists what stopped moving, with its age and destination', async () => {
+  setHandler(async path => {
+    if (path.startsWith('/stalled')) return {
+      items: [
+        { id: 't1', kind: 'task', kind_label: '任务', title: '一直没动的任务', days: 46,
+          since: '2026-10-01T00:00:00Z', basis: '创建后未修改', detail: '高优先级 · 没有计划日', destination: '/tasks' },
+        { id: 'n1', kind: 'knowledge_node', kind_label: '知识点', title: '卡住的知识点', days: 23,
+          since: '2026-10-24T00:00:00Z', basis: '最后练习或验收', detail: '未验收', destination: '/learning' },
+      ],
+      total: 2, as_of: '2026-11-16T00:00:00Z', thresholds: {}, notice: '按最后变动时间计算，不是截止日期。',
+    }
+    if (path.startsWith('/tasks')) return { items: [], total: 0, limit: 8, offset: 0 }
+    if (path.startsWith('/events')) return { items: [], total: 0 }
+    if (path === '/dashboard/preferences') return { schema_version: 1, widgets: [], shortcuts: [], version: 0, state: 'default', updated_at: null }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/dashboard/StalledWidget.vue', { enabled: true })
+  await flush(); await flush()
+
+  const text = view.text()
+  assert.match(text, /搁置的事/)
+  assert.match(text, /一直没动的任务/)
+  assert.match(text, /1 个月/, 'age is shown in a form you can judge at a glance')
+  assert.match(text, /23 天/)
+  assert.match(text, /按最后变动时间计算/, 'the basis for the number is stated')
+  const link = view.nodes().find(n => n.tag === 'a' && n.props.href === '/tasks')
+  assert.ok(link, 'each row leads to where the work can be resumed')
+  view.app.unmount()
+})
+
+test('the stalled view says so plainly when nothing is stuck', async () => {
+  setHandler(async () => ({ items: [], total: 0, notice: '按最后变动时间计算，不是截止日期。' }))
+  resetToasts()
+  const view = mountComponent('modules/dashboard/StalledWidget.vue', { enabled: true })
+  await flush(); await flush()
+  assert.match(view.text(), /没有长期没动的事/)
+  view.app.unmount()
+})
