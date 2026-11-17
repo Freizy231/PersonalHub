@@ -16,6 +16,8 @@ from datetime import date, datetime, timezone
 from ...core.database import connection
 from .service import lineage_sql
 
+DECISIONS = ('done', 'continue', 'snooze', 'drop')
+
 # A thing is "stalled" once the threshold has passed. Chosen per kind because the natural
 # rhythm differs: a task sitting for a week is suspicious, a project for a week is not.
 THRESHOLDS = {'task': 7, 'knowledge_node': 14, 'learning_path': 21, 'learning_goal': 30,
@@ -57,6 +59,7 @@ class StalledService:
             found += self._tasks(con, now)
             found += self._learning(con, now)
             found += self._projects(con, now)
+            found = self._apply_reviews(con, found, datetime.now().astimezone().date())
         # Only what has actually gone quiet, longest quiet first.
         found = [row for row in found
                  if row['days'] >= (threshold_days if threshold_days is not None else THRESHOLDS.get(row['kind'], 14))]
@@ -66,12 +69,35 @@ class StalledService:
             'total': len(found),
             'as_of': now.isoformat(timespec='seconds').replace('+00:00', 'Z'),
             'thresholds': THRESHOLDS,
-            'notice': '按最后变动时间计算，不是截止日期。私密库与回收站不在其中。',
+            'decisions': list(DECISIONS),
+            'notice': '按最后变动时间计算，不是截止日期。私密库与回收站不在其中。'
+                      '决定「继续」或「以后再说」的，会在选定的日期之前不再出现。',
         }
+
+    def _apply_reviews(self, con, found, today):
+        """Annotate each item with the last decision, and hide what was deferred to a later day.
+
+        A decision to wait is not a change to the resource, so it can only be honoured here.
+        Hiding it until `next_date` is the whole meaning of "ask me later".
+        """
+        from .reviews import ReviewService
+        latest = ReviewService(self.database).latest(con, [row['id'] for row in found])
+        kept = []
+        for row in found:
+            mark = latest.get(row['id'])
+            if mark:
+                row['last_decision'] = mark['decision']
+                row['last_reviewed'] = mark['review_date']
+                row['note'] = mark['note']
+                deferred = mark['next_date'] and mark['next_date'] > today.isoformat()
+                if deferred:
+                    continue
+            kept.append(row)
+        return kept
 
     def _tasks(self, con, now):
         rows = con.exec_driver_sql(
-            "SELECT r.id,r.title,r.updated_at,r.created_at,t.status,t.priority,t.planned_date,t.due_date,t.due_at "
+            "SELECT r.id,r.title,r.version,r.updated_at,r.created_at,t.status,t.priority,t.planned_date,t.due_date,t.due_at "
             "FROM resources r JOIN tasks t ON t.resource_id=r.id "
             "WHERE r.kind='task' AND r.privacy_level='personal' AND r.deleted_at IS NULL "
             "AND t.status IN ('todo','doing') AND " + lineage_sql('r')).mappings()
@@ -82,7 +108,7 @@ class StalledService:
             if days is None:
                 continue
             result.append({
-                'id': row['id'], 'kind': 'task', 'kind_label': LABELS['task'], 'title': row['title'],
+                'id': row['id'], 'version': row['version'], 'kind': 'task', 'kind_label': LABELS['task'], 'title': row['title'],
                 'days': days, 'since': row['updated_at'] or row['created_at'],
                 'basis': '最后修改' if row['updated_at'] != row['created_at'] else '创建后未修改',
                 'detail': self._task_detail(row), 'destination': DESTINATIONS['task'],
@@ -108,7 +134,7 @@ class StalledService:
         # A node's last movement is its own update or the latest practice/assessment/session
         # on it, whichever is later. A node that was "touched" only by clicking is not moved.
         rows = con.exec_driver_sql(
-            "SELECT r.id,r.title,r.updated_at,r.created_at,n.mastery,n.acceptance_criteria, "
+            "SELECT r.id,r.title,r.version,r.updated_at,r.created_at,n.mastery,n.acceptance_criteria, "
             "(SELECT max(x) FROM (SELECT max(s.started_at) AS x FROM learning_sessions s WHERE s.node_id=r.id "
             "UNION ALL SELECT max(a.created_at) FROM learning_assessments a WHERE a.node_id=r.id) WHERE x IS NOT NULL) AS last_activity "
             "FROM resources r JOIN knowledge_nodes n ON n.resource_id=r.id "
@@ -123,7 +149,7 @@ class StalledService:
                 continue
             practised = bool(row['last_activity'])
             result.append({
-                'id': row['id'], 'kind': 'knowledge_node', 'kind_label': LABELS['knowledge_node'],
+                'id': row['id'], 'version': row['version'], 'kind': 'knowledge_node', 'kind_label': LABELS['knowledge_node'],
                 'title': row['title'], 'days': days, 'since': since,
                 'basis': '最后练习或验收' if practised else '创建后未练习',
                 'detail': '未验收' + (' · 已有验收标准' if row['acceptance_criteria'] else ' · 还没有验收标准'),
@@ -133,7 +159,7 @@ class StalledService:
 
     def _projects(self, con, now):
         rows = con.exec_driver_sql(
-            "SELECT r.id,r.title,r.updated_at,r.created_at,p.status,p.last_opened_at, "
+            "SELECT r.id,r.title,r.version,r.updated_at,r.created_at,p.status,p.last_opened_at, "
             "(SELECT max(e.created_at) FROM project_entries e WHERE e.project_id=r.id) AS last_entry "
             "FROM resources r JOIN projects p ON p.resource_id=r.id "
             "WHERE r.kind='project' AND r.privacy_level='personal' AND r.deleted_at IS NULL "
@@ -147,7 +173,7 @@ class StalledService:
                 continue
             basis = '最后日志' if row['last_entry'] == since else '最后打开' if row['last_opened_at'] == since else '最后修改'
             result.append({
-                'id': row['id'], 'kind': 'project', 'kind_label': LABELS['project'], 'title': row['title'],
+                'id': row['id'], 'version': row['version'], 'kind': 'project', 'kind_label': LABELS['project'], 'title': row['title'],
                 'days': days, 'since': since, 'basis': basis,
                 'detail': '进行中' if row['status'] == 'active' else '状态：' + str(row['status']),
                 'destination': DESTINATIONS['project'],

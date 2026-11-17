@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from uuid import UUID
 from typing import Literal
 from fastapi import APIRouter,Depends,Header,Query,Request
@@ -7,6 +8,7 @@ from ...core.security import require_session
 from .service import KnowledgeService
 from .purge import PurgeService
 from .stalled import StalledService
+from .reviews import ReviewService
 router=APIRouter(prefix='/api/v1',dependencies=[Depends(require_session)])
 class Version(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -70,3 +72,23 @@ async def stalled(request: Request, threshold_days: int | None = Query(None, ge=
                   limit: int = Query(200, ge=1, le=500)):
     return await asyncio.to_thread(StalledService(request.app.state.settings.database).report,
                                    threshold_days, limit)
+
+
+class ReviewWrite(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    expected_version: int = Field(ge=1, strict=True)
+    decision: Literal['done', 'continue', 'snooze', 'drop']
+    note: str = Field(default='', max_length=2000)
+    # Only meaningful for "继续" and "以后再说"; the server fills in the kind's own rhythm.
+    next_date: date | None = None
+
+
+@router.get('/reviews')
+async def reviews(request: Request, limit: int = Query(50, ge=1, le=200)):
+    return await asyncio.to_thread(ReviewService(request.app.state.settings.database).recent, limit)
+
+
+@router.post('/reviews/{rid}')
+async def review(rid: UUID, payload: ReviewWrite, request: Request, idempotency_key: UUID = Header()):
+    return await asyncio.to_thread(ReviewService(request.app.state.settings.database).record_decision,
+                                   str(rid), payload, str(idempotency_key))

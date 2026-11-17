@@ -75,9 +75,9 @@ test('the stalled view lists what stopped moving, with its age and destination',
     if (path.startsWith('/stalled')) return {
       items: [
         { id: 't1', kind: 'task', kind_label: '任务', title: '一直没动的任务', days: 46,
-          since: '2026-10-01T00:00:00Z', basis: '创建后未修改', detail: '高优先级 · 没有计划日', destination: '/tasks' },
+          version: 3, since: '2026-10-01T00:00:00Z', basis: '创建后未修改', detail: '高优先级 · 没有计划日', destination: '/tasks' },
         { id: 'n1', kind: 'knowledge_node', kind_label: '知识点', title: '卡住的知识点', days: 23,
-          since: '2026-10-24T00:00:00Z', basis: '最后练习或验收', detail: '未验收', destination: '/learning' },
+          version: 2, since: '2026-10-24T00:00:00Z', basis: '最后练习或验收', detail: '未验收', destination: '/learning' },
       ],
       total: 2, as_of: '2026-11-16T00:00:00Z', thresholds: {}, notice: '按最后变动时间计算，不是截止日期。',
     }
@@ -107,5 +107,94 @@ test('the stalled view says so plainly when nothing is stuck', async () => {
   const view = mountComponent('modules/dashboard/StalledWidget.vue', { enabled: true })
   await flush(); await flush()
   assert.match(view.text(), /没有长期没动的事/)
+  view.app.unmount()
+})
+
+test('each stuck item offers the decisions that kind can honestly record', async () => {
+  setHandler(async path => {
+    if (path.startsWith('/stalled')) return {
+      items: [
+        { id: 't1', kind: 'task', kind_label: '任务', title: '停滞任务', days: 30, version: 4,
+          since: '2026-10-01T00:00:00Z', basis: '创建后未修改', detail: '高优先级', destination: '/tasks' },
+        { id: 'n1', kind: 'knowledge_node', kind_label: '知识点', title: '停滞知识点', days: 30, version: 2,
+          since: '2026-10-01T00:00:00Z', basis: '创建后未练习', detail: '未验收', destination: '/learning' },
+      ],
+      total: 2, as_of: '2026-11-16T00:00:00Z', thresholds: {}, notice: '按最后变动时间计算。',
+    }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/dashboard/StalledWidget.vue', { enabled: true })
+  await flush(); await flush()
+
+  const labels = view.nodes().filter(n => n.tag === 'button').map(n => n.text.trim())
+  assert.ok(labels.includes('完成'), 'a task can be finished from here')
+  assert.ok(labels.includes('放弃'), 'a task can be set aside')
+  assert.equal(labels.includes('已完成'), false, 'a task is not called a project')
+  assert.equal(labels.filter(l => l === '完成').length, 1, 'only the task row offers "完成"')
+  // A node is verified through an assessment that keeps its evidence; a button must not fake it.
+  assert.equal(labels.includes('不学了'), true, 'a node can be set aside')
+  const nodeRow = view.nodes().find(n => n.tag === 'li' && require('./harness.cjs').text(n).includes('停滞知识点'))
+  const nodeLabels = flatten(nodeRow).filter(n => n.tag === 'button').map(n => n.text.trim())
+  assert.equal(nodeLabels.includes('完成'), false, 'a node cannot be ticked done without an assessment')
+  view.app.unmount()
+})
+
+test('saying "later" records a decision and takes the row off the list', async () => {
+  const writes = []
+  setHandler(async (path, options) => {
+    if (path.startsWith('/stalled')) return {
+      items: [{ id: 't1', kind: 'task', kind_label: '任务', title: '停滞任务', days: 30, version: 4,
+        since: '2026-10-01T00:00:00Z', basis: '创建后未修改', detail: '高优先级', destination: '/tasks' }],
+      total: 1, as_of: '2026-11-16T00:00:00Z', thresholds: {}, notice: '按最后变动时间计算。',
+    }
+    if (path.startsWith('/reviews/')) { writes.push({ path, body: JSON.parse(options.body), options }); return { review: {}, resource: {} } }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/dashboard/StalledWidget.vue', { enabled: true })
+  await flush(); await flush()
+
+  const later = view.nodes().find(n => n.tag === 'button' && n.text.trim() === '以后再说')
+  assert.ok(later, 'a deferral is offered')
+  await later.props.onClick()
+  await flush(); await flush()
+
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].path, '/reviews/t1')
+  assert.equal(writes[0].body.decision, 'snooze')
+  assert.equal(writes[0].body.expected_version, 4, 'the decision carries the version it was made against')
+  assert.ok(writes[0].options.headers['Idempotency-Key'], 'the write is replay-safe')
+  assert.equal(view.text().includes('停滞任务'), false, 'a deferred row leaves the list right away')
+  view.app.unmount()
+})
+
+test('dropping something asks once before taking it off the list', async () => {
+  const writes = []
+  setHandler(async (path, options) => {
+    if (path.startsWith('/stalled')) return {
+      items: [{ id: 'p1', kind: 'project', kind_label: '项目', title: '旧项目', days: 60, version: 2,
+        since: '2026-09-01T00:00:00Z', basis: '最后修改', detail: '进行中', destination: '/projects' }],
+      total: 1, as_of: '2026-11-16T00:00:00Z', thresholds: {}, notice: '按最后变动时间计算。',
+    }
+    if (path.startsWith('/reviews/')) { writes.push({ path, body: JSON.parse(options.body) }); return { review: {}, resource: {} } }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/dashboard/StalledWidget.vue', { enabled: true })
+  await flush(); await flush()
+
+  const archive = view.nodes().find(n => n.tag === 'button' && n.text.trim() === '归档')
+  await archive.props.onClick()
+  await flush()
+  assert.equal(writes.length, 0, 'the first click only asks')
+  assert.equal(view.text().includes('旧项目'), true)
+
+  const yes = view.nodes().find(n => n.tag === 'button' && n.text.trim() === '确定')
+  assert.ok(yes, 'the confirmation names its consequence')
+  await yes.props.onClick()
+  await flush(); await flush()
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].body.decision, 'drop')
   view.app.unmount()
 })

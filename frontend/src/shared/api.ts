@@ -188,6 +188,11 @@ const messages: Record<string, string> = {
   IDEMPOTENCY_CONFLICT: '重复提交的内容发生变化，请刷新核对原任务。',
   IDEMPOTENCY_RESULT_TRASHED: '这次创建已成功，但记录后来进入了回收站。请到回收站核对。',
   DEADLINE_CONFLICT: '截止日期与精确截止时间只能保留一个。',
+  REVIEW_UNSUPPORTED_KIND: '这一类还不能这样处理，请到对应页面操作。',
+  REVIEW_DONE_NEEDS_ASSESSMENT: '学习节点要通过验收才算完成：请在「学习」里记录一次验收，而不是在这里打勾。',
+  REVIEW_DATE_NOT_FUTURE: '「继续」和「以后再说」的日期要晚于今天。',
+  REVIEW_DATE_NOT_ALLOWED: '完成或放弃不需要再定日期。',
+  REVIEW_ALREADY_FINISHED: '这件事已经完成或已取消，不能再安排继续。',
   VALIDATION_ERROR: '输入格式不正确，请检查名称、日期、时间和其他必填字段。',
   CSRF_INVALID: '操作凭据已失效，请刷新页面后重试。',
 }
