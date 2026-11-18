@@ -109,5 +109,24 @@ def restore_hub(settings: Settings, backup: Path, output: Path):
     restored_revision = revision(output / DATABASE_NAME)
     if restored_revision not in SUPPORTED_REVISIONS:
         raise HubError('DATABASE_VERSION_UNSUPPORTED', 503)
+    suspended = suspend_ai_grants(output / DATABASE_NAME, restored_revision)
     return {'status': 'verified', 'revision': restored_revision,
-            'output': str(output), 'integrity_check': result['audit']['integrity_check']}
+            'output': str(output), 'integrity_check': result['audit']['integrity_check'],
+            'ai_grants_suspended': suspended}
+
+
+def suspend_ai_grants(database: Path, restored_revision: str):
+    """Disable every AI grant in a restored copy, if that copy has the tables.
+
+    A grant names a scope and an endpoint that were authorized against the data of another
+    moment. Restoring a backup must not silently re-arm writing or sending, so the restored
+    copy starts with everything off and the person turns it back on.
+    """
+    if restored_revision < '0018':
+        return 0
+    with connection(database, write=True) as con:
+        count = con.exec_driver_sql('SELECT count(*) FROM ai_grants WHERE enabled=1').scalar_one()
+        if count:
+            con.exec_driver_sql("UPDATE ai_grants SET enabled=0,updated_at=? WHERE enabled=1",
+                                (datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z'),))
+        return int(count)

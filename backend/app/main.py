@@ -139,11 +139,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if database_status(settings.database)=='ready':
                 await asyncio.to_thread(IntelligenceService(settings).recover)
                 await asyncio.to_thread(app.state.assistant.recover)
+                from .modules.knowledge.templates import ensure_default_templates
+                await asyncio.to_thread(ensure_default_templates, settings.database)
+
             app.state.launch_file = write_launch_file(settings, auth.bootstrap)
             await app.state.reminder_worker.start()
             await app.state.extraction_worker.start()
             await app.state.search_worker.start()
             await app.state.intel_worker.start()
+            await app.state.review_worker.start()
             expiry = asyncio.create_task(expire_vault())
             try:
                 yield
@@ -157,6 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await app.state.extraction_worker.stop()
                 await app.state.search_worker.stop()
                 await app.state.intel_worker.stop()
+                await app.state.review_worker.stop()
                 auth.sessions.clear()
                 auth.bootstrap = ""
 
@@ -188,10 +193,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.reminder_worker = ReminderWorker(settings)
     from .modules.intelligence.worker import ScheduleWorker
     app.state.intel_worker = ScheduleWorker(settings)
+    from .modules.knowledge.review_worker import ReviewWorker
+    app.state.review_worker = ReviewWorker(settings)
     app.include_router(note_router)
     app.include_router(task_router)
     app.include_router(event_router)
     app.include_router(reminder_router)
+    from .modules.knowledge.workspace_router import router as workspace_router
+    from .modules.knowledge.gateway import ModelGateway
+    app.include_router(workspace_router)
+    app.state.model_gateway = ModelGateway(app.state.assistant)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     def error_response(code: str, status: int, message: str | None = None, request_id: str | None = None):
@@ -299,7 +310,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"version": VERSION, "phase": 4, "database": database_status(settings.database),
                 "ai": "optional_api", "legacy_intelligence": "preserved", "data_mode": "local",
                 "private_vault": "encrypted", "backup_scope": "hub_database_notes_vault_and_library", "documents":"available", "learning":"available", "search":app.state.search_worker.state, "pdf_worker":app.state.extraction_worker.state, "notes": "available", "tasks": "available", "events": "available", "reminders": app.state.reminder_worker.state,
-                "intel_schedule": app.state.intel_worker.state}
+                "intel_schedule": app.state.intel_worker.state,
+                "ai_review": app.state.review_worker.state}
 
     if settings.frontend_dist.is_dir():
         assets = settings.frontend_dist / "assets"

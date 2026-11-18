@@ -25,6 +25,8 @@ const LibraryPanel = defineAsyncComponent(() => import('./modules/library/Librar
 const ProjectPanel = defineAsyncComponent(() => import('./modules/projects/ProjectPanel.vue'))
 const IntelligencePanel = defineAsyncComponent(() => import('./modules/intelligence/IntelligencePanel.vue'))
 const AssistantPanel = defineAsyncComponent(() => import('./modules/assistant/AssistantPanel.vue'))
+const WorkspacePanel = defineAsyncComponent(() => import('./modules/assistant/WorkspacePanel.vue'))
+const AiPermissions = defineAsyncComponent(() => import('./modules/assistant/AiPermissions.vue'))
 const SearchPanel = defineAsyncComponent(() => import('./modules/knowledge/SearchPanel.vue'))
 const ResourcePage = defineAsyncComponent(() => import('./modules/knowledge/ResourcePage.vue'))
 const ToolSettings = defineAsyncComponent(() => import('./modules/projects/ToolSettings.vue'))
@@ -123,6 +125,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     { path: '/ai', label: 'AI 助手', symbol: 'ai' },
   ] },
 ]
+const aiView = computed(() => (String(route.query.view || 'workspace') === 'ask' ? 'ask' : 'workspace'))
 function isActive(item: NavItem) {
   if (item.exact) return route.path === '/'
   return route.path === item.path || route.path.startsWith(item.path + '/')
@@ -342,7 +345,16 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else-if="route.path === '/ai'">
-            <AssistantPanel :enabled="enabled" @draft="setDraft('ai', $event)" />
+            <div class="chip-row" role="tablist" aria-label="AI 视图">
+              <button class="chip-button" role="tab" :aria-selected="aiView === 'workspace'"
+                :tabindex="aiView === 'workspace' ? 0 : -1"
+                @click="router.replace({ path: '/ai', query: {} })">学习工作台</button>
+              <button class="chip-button" role="tab" :aria-selected="aiView === 'ask'"
+                :tabindex="aiView === 'ask' ? 0 : -1"
+                @click="router.replace({ path: '/ai', query: { view: 'ask' } })">基于资料提问</button>
+            </div>
+            <WorkspacePanel v-if="aiView === 'workspace'" :enabled="enabled" @draft="setDraft('ai', $event)" />
+            <AssistantPanel v-else :enabled="enabled" @draft="setDraft('ai', $event)" />
           </template>
 
           <template v-else-if="route.path === '/search'">
@@ -374,6 +386,7 @@ onBeforeUnmount(() => {
             </section>
             <section class="settings-section"><DashboardPanel mode="settings" :enabled="enabled" @draft="setDraft('dashboard', $event)" /></section>
             <AssistantPanel v-if="enabled" mode="settings" :enabled="true" @draft="setDraft('ai', $event)" />
+            <AiPermissions v-if="enabled" />
             <MaintenancePanel v-if="enabled" />
             <ToolSettings v-if="enabled" @draft="setDraft('tools', $event)" />
             <section class="settings-section">

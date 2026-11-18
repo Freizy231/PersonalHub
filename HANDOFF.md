@@ -1,5 +1,82 @@
 # Personal Hub 开发交接
 
+## 最新：AI 原生改造（schema `0018_ai_workspace`，活动库需停服升级）
+
+2026-11-18。按 `Personal-Hub-AI原生改造需求.md` 实施 P0–P4。改动前已建立备份：一份完整数据快照与一份源码归档，保存在本机用户目录之外的备份目录
+（具体位置属于本机运行痕迹，不记录在此），并打了 git 标签 `v0.14.2-before-major`。
+
+**这轮改变了旧规则。** 见 [ADR-0018](docs/ADR_0018_AI_CAPABILITIES.md)：旧文档中「AI 只读、无工具、无历史、
+单轮问答、内置 Agent 冻结、暂不动 AI 助手」不再适用。任意代码自修改与通用命令执行仍不在范围。
+数据保护、加密私密库、版本/哈希校验、幂等、证据验收、出站网络约束全部保留。
+
+### 现在能做什么
+
+1. **AI 工作台**（`/ai` → 学习工作台）：选一个学习目标，用自己的话描述想学什么，得到可编辑的计划草稿；
+   「采用计划」后真实写入学习模块与任务模块，每条结果都能点开。
+2. **能力接入层**：9 个已注册能力（检索、读资料、建目标/路线/知识点、建练习、安排今日练习、建笔记、
+   读相关练习）。每个能力有版本、参数白名单、影响类型与可逆性说明。
+3. **两项独立授权**（设置 → AI 权限）：本机写入（绑定学习目标）与外发（绑定服务地址+模型+配置版本），
+   分别授予、分别撤销、默认 30 天。
+4. **个人模板**：两个默认模板（学习推进、论文精读）。可保存、停用、再次运行。论文精读完全由能力组合而成，
+   执行器里没有它的任何专用分支。
+5. **复盘**：只报告记录到的事实；没有记录时说「目前没有记录到进展」，不判断拖延或能力。可选的定时复盘
+   worker 只在周期到了且未跑过时计算一次，不调用模型。
+
+### 新增或变更的主要文件
+
+| 位置 | 作用 |
+| --- | --- |
+| `backend/app/core/capabilities.py` | 能力契约，不导入业务模块 |
+| `backend/app/modules/knowledge/adapters.py` | 9 个适配器与范围校验 |
+| `backend/app/modules/knowledge/executor.py` | 运行/步骤状态、幂等键、授权复检、符号引用绑定 |
+| `backend/app/modules/knowledge/planner.py` | 模型输出 → 经校验的候选步骤 |
+| `backend/app/modules/knowledge/workspace.py` | 会话、计划采用、授权、偏好、模板、复盘、排期 |
+| `backend/app/modules/knowledge/templates.py` | 两个默认模板（纯能力组合） |
+| `backend/app/modules/knowledge/review_worker.py` | 定时复盘，不调用模型 |
+| `backend/app/modules/knowledge/gateway.py` | 模型调用，复用现有配置与出站约束 |
+| `backend/migrations/versions/0018_ai_workspace.py` | 8 张新表，不触碰任何既有表 |
+| `frontend/src/modules/assistant/WorkspacePanel.vue` | 学习工作台 |
+| `frontend/src/modules/assistant/AiPermissions.vue` | 授权与模板设置 |
+
+说明文档：[ADR-0018](docs/ADR_0018_AI_CAPABILITIES.md)、[扩展指南](docs/AI_EXTENDING.md)。
+
+### 验证结果（如实区分三类）
+
+- **自动测试**：后端 368、前端 93、根目录 67 全部通过；`vue-tsc` 与生产构建通过。
+- **隔离数据演练**：全新数据根 `init → upgrade` 到 0018，升级演练通过；真实数据**副本**从 0017 升级到 0018
+  通过，`integrity_check=ok`、外键无异常、既有行数不变（resources 46 / notes 4 / tasks 14）、8 张新表为空。
+- **真实浏览器**：用隔离数据根 + 脚本化模型（只替换远端调用，其余全部是真实路由与写入）走通
+  「选目标 → 描述 → 生成计划 → 采用 → 真实节点/练习/笔记 → 复盘」。截图核对过。被拒步骤（`system.shell`）
+  在界面上明确列出。设置页的两项授权与模板列表也已截图核对。
+- **未验证**：真实模型服务连通（未配置服务商、未付费调用）；多轮对话的上下文截断行为只做了单元级验证；
+  窄屏与矮窗口下本轮新页面未逐一截图。
+
+### 活动数据升级步骤
+
+本轮**没有**改动活动数据根 `runtime/personal-hub`（仍是 0017）。要使用新功能：
+
+```bash
+# 1. 停止服务
+# 2. 升级（会先自动备份并在副本演练）
+backend/.venv/bin/python -B -m backend.manage upgrade --data-root runtime/personal-hub
+# 3. 重新构建并启动
+cd frontend && npm run build && cd ..
+backend/.venv/bin/python -B -m backend.manage serve --data-root runtime/personal-hub --port 8765 --open
+```
+
+回退：停服后从 `runtime/personal-hub/maintenance/upgrade-*/pre-upgrade` 或本次改动前建立的
+完整数据快照，恢复到全新目录，再用 `v0.14.2-before-major` 标签的源码运行。
+备份恢复会把所有 AI 授权置为停用，避免旧授权在新数据上生效。
+
+### 已知限制
+
+- 模型未配置时，工作台可以加载目标、看复盘，但生成计划会提示「AI 未启用」；原有功能不受影响。
+- 计划采用是分步提交，不是跨模块原子事务；失败会准确报告已完成与未完成部分。
+- 会话按条数与长度限制，不做自动摘要。
+- 定时复盘只产生本地报告，不替你调用模型。
+
+---
+
 ## 最新：实测反馈修正（schema 升到 0016_intel_schedule，需停服升级）
 
 2026-11-16。按实测反馈修改；饮食与 AI 助手按你的要求暂不动。

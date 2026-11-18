@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import MetaData, create_engine
 from sqlalchemy.pool import NullPool
 
-SCHEMA_REVISION = '0017_stalled_reviews'
-SUPPORTED_REVISIONS = {'0000_foundation', '0001_tasks', '0002_events_reminders', '0003_notes', '0004_dashboard_preferences', '0005_ordinary_tags', '0006_knowledge_foundation', '0007_phase2', '0008_projects', '0009_project_tools', '0010_diet', '0011_finance_exercise', '0012_intelligence_assistant', '0013_intel_ordering', '0014_epub_documents', '0015_meal_dishes', '0016_intel_schedule', SCHEMA_REVISION}
+SCHEMA_REVISION = '0018_ai_workspace'
+SUPPORTED_REVISIONS = {'0000_foundation', '0001_tasks', '0002_events_reminders', '0003_notes', '0004_dashboard_preferences', '0005_ordinary_tags', '0006_knowledge_foundation', '0007_phase2', '0008_projects', '0009_project_tools', '0010_diet', '0011_finance_exercise', '0012_intelligence_assistant', '0013_intel_ordering', '0014_epub_documents', '0015_meal_dishes', '0016_intel_schedule', '0017_stalled_reviews', SCHEMA_REVISION}
 BASELINE_REVISION = '0000_foundation'
 metadata = MetaData()
 

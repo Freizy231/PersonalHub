@@ -31,7 +31,7 @@ def backend_codes():
     codes = set()
     for path in BACKEND.rglob('*.py'):
         text = path.read_text(encoding='utf-8')
-        for args in calls(text, 'HubError'):
+        for args in list(calls(text, 'HubError')) + list(calls(text, 'CapabilityError')):
             match = re.match(r"\s*['\"](" + CODE + r")['\"]", args)
             if match:
                 codes.add(match.group(1))

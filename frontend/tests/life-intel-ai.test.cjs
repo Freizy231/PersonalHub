@@ -271,3 +271,123 @@ test('intelligence shows a card per source, trends inline and both language summ
   assert.ok(writes.some(w => w.path === '/intelligence/sources/s1/collect'), 'an explicit collect button sends the request')
   view.app.unmount()
 })
+
+test('the AI workspace turns a candidate plan into real records only when adopted', async () => {
+  const writes = []
+  setHandler(async (path, options) => {
+    if (options) {
+      writes.push({ path, body: options.body ? JSON.parse(options.body) : null })
+      if (path === '/ai/conversations') return { id: 'conv-1' }
+      if (path.endsWith('/plan')) return {
+        id: 'plan-1', title: '四周 RAG 计划', rationale: '按你的 Python 基础和每天四十分钟',
+        rejected: [{ code: 'CAPABILITY_UNKNOWN', detail: '第 3 步：system.shell' }],
+        steps: [
+          { position: 0, capability_id: 'learning.node.create', arguments: { title: '向量检索' }, state: 'pending' },
+          { position: 1, capability_id: 'learning.practice.create', arguments: { title: '写余弦相似度' }, state: 'pending' },
+        ], state: 'draft',
+      }
+      if (path === '/ai/plans/plan-1/adopt') return {
+        id: 'run-1', status: 'success',
+        steps: [{ position: 0, capability_id: 'learning.node.create', status: 'done',
+                  summary: '已创建知识点「向量检索」', resource_ids: ['n1'], error_code: null }],
+      }
+      return {}
+    }
+    if (path.startsWith('/learning/learning_goal')) return { items: [{ id: 'g1', title: 'RAG 项目', version: 1 }] }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/assistant/WorkspacePanel.vue', { enabled: true })
+  await flush(); await flush()
+
+  assert.equal(writes.length, 0, 'opening the workspace writes nothing')
+  const area = view.nodes().find(n => n.tag === 'textarea')
+  area.value = '我想四周内做出一个能用的 RAG 小项目'
+  area.events.input?.({ target: area })
+  await flush()
+  await view.button('生成计划草稿').props.onClick(); await flush(); await flush()
+
+  const text = view.text()
+  assert.match(text, /四周 RAG 计划/)
+  assert.match(text, /创建知识点/)
+  assert.match(text, /未通过校验/, 'refused steps are named, not silently dropped')
+  assert.equal(writes.some(w => w.path.includes('/adopt')), false, 'previewing does not adopt')
+
+  await view.button('采用计划').props.onClick(); await flush(); await flush()
+  const adopt = writes.find(w => w.path === '/ai/plans/plan-1/adopt')
+  assert.ok(adopt, 'adopting is an explicit second action')
+  assert.match(view.text(), /全部完成/)
+  view.app.unmount()
+})
+
+test('without a learning goal the workspace says where to start', async () => {
+  setHandler(async () => ({ items: [] }))
+  resetToasts()
+  const view = mountComponent('modules/assistant/WorkspacePanel.vue', { enabled: true })
+  await flush(); await flush()
+  assert.match(view.text(), /还没有学习目标/)
+  assert.match(view.text(), /学习/, 'it points at the page that creates one')
+  view.app.unmount()
+})
+
+test('a review with no records is reported as an absence, not a judgement', async () => {
+  setHandler(async (path, options) => {
+    if (options && path === '/ai/review') return {
+      observation: '目前没有记录到进展：这个目标下还没有练习任务或验收记录。',
+      notice: '这些是系统记录到的数据；系统不会据此判断你拖延或能力不足。',
+      next: [{ action: '添加新的知识点', reason: '当前节点都已验收或无待办' }],
+    }
+    if (path.startsWith('/learning/learning_goal')) return { items: [{ id: 'g1', title: 'RAG 项目', version: 1 }] }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/assistant/WorkspacePanel.vue', { enabled: true })
+  await flush(); await flush()
+  await view.button('看看进展').props.onClick(); await flush(); await flush()
+  assert.match(view.text(), /没有记录到进展/)
+  assert.match(view.text(), /不会据此判断你拖延/)
+  view.app.unmount()
+})
+
+test('the two AI permissions are granted and revoked separately', async () => {
+  const writes = []
+  const granted = []
+  setHandler(async (path, options) => {
+    if (options) {
+      const body = JSON.parse(options.body)
+      writes.push({ path, body })
+      granted.push({ id: 'grant-' + granted.length, kind: body.kind, scope_id: body.scope_id,
+                     enabled: true, active: true, expires_at: '2027-01-01T00:00:00+08:00',
+                     endpoint: '', model: '' })
+      return {}
+    }
+    if (path.startsWith('/learning/learning_goal')) return { items: [{ id: 'g1', title: 'RAG 项目', version: 1 }] }
+    if (path === '/ai/grants') return { items: granted }
+    if (path === '/ai/templates') return { items: [
+      { id: 't1', name: '论文精读（默认）', purpose: '读论文', version: 1, enabled: true, steps: [{ capability_id: 'notes.create', arguments: {} }] },
+    ] }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/assistant/AiPermissions.vue', { enabled: true })
+  await flush(); await flush()
+  const text = view.text()
+  assert.match(text, /允许在本机创建学习内容/)
+  assert.match(text, /允许把资料发送给模型服务/)
+  assert.equal(text.includes('JSON'), false, 'implementation details stay out of the product page')
+
+  const grantButtons = () => view.nodes().filter(n => n.tag === 'button' && require('./harness.cjs').text(n).includes('授权 30 天'))
+  const local = grantButtons()[0]
+  await local.props.onClick(); await flush(); await flush()
+  assert.equal(writes[0].body.kind, 'local_write')
+  assert.equal(writes[0].body.scope_id, 'g1', 'the local grant is bound to a learning goal')
+  assert.equal(writes[0].body.days, 30)
+
+  // The local grant now shows 撤销, so the remaining 授权 button is the outbound one.
+  const outbound = grantButtons()[0]
+  assert.ok(outbound, 'the outbound permission is still ungranted')
+  await outbound.props.onClick(); await flush(); await flush()
+  assert.equal(writes[1].body.kind, 'outbound')
+  assert.equal(writes[1].body.scope_id, null, 'sending is not tied to a learning goal')
+  view.app.unmount()
+})

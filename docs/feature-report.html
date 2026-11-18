@@ -1,0 +1,708 @@
+<title>Personal Hub 功能报告</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a single reading column with a sticky chapter rail on wide screens;
+   the system's own warm-neutral + forest-green palette, because the page describes it. */
+:root {
+  color-scheme: light;
+  --bg: #faf9f6;
+  --surface: #ffffff;
+  --surface-2: #f3f4ef;
+  --text: #20261f;
+  --text-soft: #4d574d;
+  --muted: #5b645a;
+  --border: #e2e5dc;
+  --border-strong: #c9d0c3;
+  --accent: #2c6249;
+  --accent-soft: #e7efe8;
+  --warning: #8a5d16;
+  --warning-soft: #f6efdf;
+  --danger: #a8412c;
+  --code: #f0f1ea;
+
+  --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+  --font-display: "Inter", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  --step--1: 0.78rem;
+  --step-0: 0.9rem;
+  --step-1: 1rem;
+  --step-2: 1.2rem;
+  --step-3: 1.5rem;
+  --step-4: 2rem;
+  --step-5: 2.6rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #161a17;
+    --surface: #1e2420;
+    --surface-2: #242b26;
+    --text: #e6ebe4;
+    --text-soft: #bdc7bb;
+    --muted: #98a397;
+    --border: #313a33;
+    --border-strong: #414c43;
+    --accent: #8ec8a8;
+    --accent-soft: #22302a;
+    --warning: #e0b878;
+    --warning-soft: #2e2a1f;
+    --danger: #e59a86;
+    --code: #232a24;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161a17;
+  --surface: #1e2420;
+  --surface-2: #242b26;
+  --text: #e6ebe4;
+  --text-soft: #bdc7bb;
+  --muted: #98a397;
+  --border: #313a33;
+  --border-strong: #414c43;
+  --accent: #8ec8a8;
+  --accent-soft: #22302a;
+  --warning: #e0b878;
+  --warning-soft: #2e2a1f;
+  --danger: #e59a86;
+  --code: #232a24;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  line-height: 1.75;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: var(--space-6) var(--space-7);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.3; }
+p { margin: 0; }
+a { color: var(--accent); }
+code, kbd { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--code); padding: 0.1em 0.35em; border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+kbd {
+  border: 1px solid var(--border-strong); border-bottom-width: 2px;
+  border-radius: var(--radius-sm); padding: 0 0.35em; background: var(--surface);
+  font-size: 0.82em; white-space: nowrap;
+}
+
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: var(--space-7); align-items: start; }
+.rail { position: sticky; top: var(--space-5); display: grid; gap: var(--space-3); font-size: var(--step--1); }
+.rail-title { font-family: var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-size: 0.7rem; }
+.rail nav { display: grid; gap: 1px; }
+.rail a { display: block; padding: 0.3rem 0.55rem; border-left: 2px solid transparent; color: var(--text-soft); text-decoration: none; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.rail a:hover, .rail a:focus-visible { color: var(--accent); background: var(--accent-soft); border-left-color: var(--accent); outline: none; }
+main { min-width: 0; display: grid; gap: var(--space-7); }
+
+.masthead { display: grid; gap: var(--space-4); padding-bottom: var(--space-5); border-bottom: 1px solid var(--border); }
+.eyebrow { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: var(--step-5); letter-spacing: -.02em; font-weight: 640; }
+.lede { font-size: var(--step-2); line-height: 1.65; color: var(--text-soft); max-width: 62ch; }
+.meta-row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); font-size: var(--step--1); color: var(--muted); font-family: var(--font-mono); }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: var(--space-3); }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); display: grid; gap: 2px; }
+.stat b { font-size: var(--step-3); font-weight: 620; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.stat span { font-size: var(--step--1); color: var(--muted); line-height: 1.5; }
+
+section.chapter { display: grid; gap: var(--space-4); scroll-margin-top: var(--space-5); }
+.chapter-head { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); }
+h2 { font-size: var(--step-4); letter-spacing: -.01em; font-weight: 620; }
+.chapter-head .tag { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+h3 { font-size: var(--step-2); font-weight: 600; margin-top: var(--space-2); }
+h4 { font-size: var(--step-1); font-weight: 600; color: var(--text-soft); }
+
+.feature { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-5); display: grid; gap: var(--space-3); }
+.feature > .feature-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.feature h3 { margin: 0; }
+.feature .path { font-family: var(--font-mono); font-size: 0.74rem; color: var(--muted); overflow-wrap: anywhere; }
+
+ul.plain, ol.plain { margin: 0; padding-left: 1.15rem; display: grid; gap: 0.35rem; }
+ul.plain li::marker { color: var(--border-strong); }
+ul.tight { gap: 0.15rem; font-size: var(--step-0); }
+
+.rules { display: grid; gap: var(--space-2); }
+.rule { display: grid; grid-template-columns: 1.2rem 1fr; gap: var(--space-3); align-items: start; }
+.rule .mark { font-family: var(--font-mono); font-size: 0.74rem; color: var(--accent); padding-top: 0.28em; }
+.rule .body { min-width: 0; }
+
+.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 var(--radius-md) var(--radius-md) 0; padding: var(--space-3) var(--space-4); font-size: var(--step-0); }
+.callout.warn { border-left-color: var(--warning); background: var(--warning-soft); }
+.callout > b { display: block; font-size: var(--step--1); letter-spacing: .06em; text-transform: uppercase; font-family: var(--font-mono); color: var(--muted); margin-bottom: 0.2rem; font-weight: 500; }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+th, td { text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font-weight: 600; color: var(--text-soft); background: var(--surface-2); font-size: 0.74rem; letter-spacing: .04em; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.pill { display: inline-block; font-size: 0.72rem; font-family: var(--font-mono); padding: 0.05em 0.5em; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-soft); white-space: nowrap; }
+.pill.ok { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.pill.hold { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); }
+.pill.off { color: var(--muted); }
+
+.principle { display: grid; gap: var(--space-2); }
+.principle .lead { font-size: var(--step-2); font-weight: 590; line-height: 1.5; }
+.principle p { color: var(--text-soft); max-width: 66ch; }
+
+.note { font-size: var(--step--1); color: var(--muted); }
+hr.soft { border: 0; border-top: 1px solid var(--border); margin: 0; }
+
+footer { border-top: 1px solid var(--border); padding-top: var(--space-4); color: var(--muted); font-size: var(--step--1); display: grid; gap: var(--space-2); }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
+  .rail { position: static; order: 2; border-top: 1px solid var(--border); padding-top: var(--space-4); }
+  .rail nav { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-1); }
+  h1 { font-size: var(--step-4); }
+  .lede { font-size: var(--step-1); }
+  .feature { padding: var(--space-4); }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="rail-title">目录</div>
+    <nav aria-label="章节目录">
+      <a href="#status">当前状态</a>
+      <a href="#principles">贯穿全局的原则</a>
+      <a href="#life">生活</a>
+      <a href="#learning">学习与项目</a>
+      <a href="#library">资料库与知识</a>
+      <a href="#intelligence">情报与 AI</a>
+      <a href="#review">搁置与复盘</a>
+      <a href="#foundation">底座与安全</a>
+      <a href="#quality">工程质量</a>
+      <a href="#gaps">已知边界</a>
+    </nav>
+  </aside>
+
+  <main>
+    <header class="masthead">
+      <div class="eyebrow">功能报告 · v0.14.2 · schema 0017</div>
+      <h1>Personal Hub 已实现功能</h1>
+      <p class="lede">一个只在本机运行的个人学习与生活工作台。这份报告按模块盘点它现在真正能做什么、每条功能背后有哪些真实约束，以及哪些地方是刻意没做的。</p>
+      <div class="meta-row">
+        <span>157 个 HTTP 路由</span>
+        <span>17 次数据库迁移</span>
+        <span>15 个功能模块</span>
+        <span>报告日期 2026-11-18</span>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>340</b><span>后端测试</span></div>
+        <div class="stat"><b>89</b><span>前端测试</span></div>
+        <div class="stat"><b>67</b><span>根目录测试</span></div>
+        <div class="stat"><b>228</b><span>错误码</span></div>
+        <div class="stat"><b>~7.9k</b><span>后端代码行</span></div>
+        <div class="stat"><b>~8.5k</b><span>前端代码行</span></div>
+      </div>
+    </header>
+
+    <section class="chapter" id="status">
+      <div class="chapter-head"><h2>当前状态</h2><span class="tag">基线</span></div>
+      <p>系统由 FastAPI + SQLite 后端与 Vue 3 前端组成，只监听 <code>127.0.0.1</code>，单用户、无账号体系。功能上已覆盖生活记录、学习闭环、资料库、项目推进、技术情报与可选的 AI 问答六大块，外加一套统一的资源、标签、搜索、回收站与永久删除基础设施。</p>
+      <p>以下是各模块的成熟度。这里区分两件事：功能是否实现，和是否在真实浏览器里逐项点过。表格里标的是前者。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>模块</th><th>核心闭环</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td>任务 / 日程 / 提醒</td><td>计划 → 执行 → 完成，站内提醒与停机补偿</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>笔记 / 私密库</td><td>Markdown 编辑、不可变修订、独立加密容器</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>饮食</td><td>食材 → 食谱 → 三餐 → 采购建议 → 库存</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>财务</td><td>记账、分类预算、月度报表、导入导出</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>运动</td><td>训练计划与实际记录分离统计</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>学习</td><td>目标 → 路线 → 知识点树，证据式验收</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>资料库</td><td>PDF / EPUB 导入提取、书籍、网页、课程</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>项目</td><td>里程碑、共享任务、日志、外部工具启动</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>知识层</td><td>统一资源、关联反链、全文搜索、永久删除</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>情报</td><td>四类采集源、每源关键词、趋势、定时采集</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>AI 助手</td><td>显式选料、发送前预览、一次性确认</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>搁置与复盘</td><td>停滞清单 + 四种处置决定</td><td><span class="pill ok">已实现</span></td></tr>
+            <tr><td>AI 连续问答</td><td>多轮对话</td><td><span class="pill hold">未实现</span></td></tr>
+            <tr><td>饮食库存自动扣减</td><td>做菜后自动减少库存</td><td><span class="pill hold">已搁置</span></td></tr>
+            <tr><td>情报双语简介</td><td>摘要自动生成第二语言</td><td><span class="pill hold">待定</span></td></tr>
+            <tr><td>本地音乐 / 本地模型</td><td>—</td><td><span class="pill off">明确取消</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="chapter" id="principles">
+      <div class="chapter-head"><h2>贯穿全局的几条原则</h2><span class="tag">理解了才看得懂细节</span></div>
+      <p>下面每个模块的具体规则，基本都是这几条原则的展开。先看原则，后面的细节才有落点。</p>
+
+      <div class="principle">
+        <div class="lead">派生事实不反写权威事实。</div>
+        <p>运动计划不计入实际统计、菜单不会自动扣库存、任务全部完成不会自动把里程碑标为达成、学习时长不会自动提升掌握度。计划、执行、验收是三类不同的事实，系统的立场是：不能因为「看起来该完成了」就替你记下「已经完成」。</p>
+      </div>
+      <div class="principle">
+        <div class="lead">隐私隔离是结构性的，不是查询条件。</div>
+        <p>私密库根本不存放在 SQLite 资源表里，而是一个独立加密文件。搜索、AI、普通导出各自有独立的允许清单和排除项。这样即使某处忘了加 <code>where</code> 条件，也不会泄漏——路径本身就不存在。</p>
+      </div>
+      <div class="principle">
+        <div class="lead">不可逆的动作必须显式确认并说明后果。</div>
+        <p>永久删除先预览影响范围、遇到被引用的记录直接整体拒绝。AI 发送前生成预览，明确告知「正文和标题会发到这个地址」。外部程序启动先预览参数，确认后只启动一次。没有任何一处是「点了就执行、失败再说」。</p>
+      </div>
+      <div class="principle">
+        <div class="lead">所有写操作可重试，冲突显式报错。</div>
+        <p>每个写请求带幂等键，重复提交不会产生重复记录；资源类写入还要求版本号，版本不符直接报冲突，不做「最后写入获胜」。这是本地单用户系统也坚持做的一点，因为它决定了断网、误点、页面卡顿之后数据是否还能信任。</p>
+      </div>
+      <div class="principle">
+        <div class="lead">文件与原始载荷是事实，索引是投影。</div>
+        <p>笔记正文、文献原件、情报原始响应都以文件或原始字节保存并带哈希。搜索索引、趋势曲线、AI 上下文都是从它们算出来的，可以随时重建。因此索引损坏不会丢数据，重置索引是安全的操作。</p>
+      </div>
+    </section>
+
+    <section class="chapter" id="life">
+      <div class="chapter-head"><h2>生活</h2><span class="tag">任务 · 日程 · 提醒 · 饮食 · 财务 · 运动</span></div>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>任务</h3>
+          <span class="path">life/tasks · TaskPanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>六种视图：全部、今天、即将到期、已逾期、已完成、回收站</li>
+          <li>优先级 0–3、计划日、截止日或截止时刻（二选一）、四项状态</li>
+          <li>快速添加支持中文前缀「今天 / 明天 / 后天」和「!」标记高优先级</li>
+          <li>勾选完成支持 8 秒内撤销；回收站可恢复；导出 JSON</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">截止日期与截止时刻互斥。创建时校验，编辑时按合并后的结果再校验一次。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">时区必须是真实的 IANA 时区（会拒绝「America」这类目录名），截止时刻统一转成 UTC 微秒存。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">提交的字段和当前值完全相同时直接返回、不升版本、不写活动记录。所以同一请求重发是安全的。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">幂等重放时如果原任务已被删除，返回「这条创建成功过，但记录已进回收站」，不会复活已删任务。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>日程</h3>
+          <span class="path">life/events · EventPanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>月历网格、单日议程、回收站；全天与定时两类日程</li>
+          <li>可关联一个任务，关联只做只读投影，不改变任务状态</li>
+          <li>可直接在日程上设置一次性提醒</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">全天日程必须只有起止日期、定时日程必须只有起止时刻，两类字段不能混用。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">全天日程按「结束日期开区间」存储，界面显示时再减一天，避免跨天的常见差一天错误。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">编辑时如果不传关联任务字段就保留原关联（哪怕对方已不可见）；显式传 null 才解绑。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">前端会拒绝不存在的本地时间和夏令时重复区间，而不是让浏览器默默取一个值。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>提醒</h3>
+          <span class="path">life/reminders · ReminderPanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>绑定任务或日程的一次性站内提醒；收件箱、历史、按资源查看</li>
+          <li>后台每 5 秒扫描一次，批量推进状态</li>
+          <li>只做站内收件箱，不推系统通知</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">只能提醒仍处于进行中的任务和仍有效的日程；创建时还会核对目标的当前版本。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">停止服务后 24 小时内重启会补投；更早的标为「已错过」而不是突然补一堆。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">「已投递」表示事实已落库，不代表你看到了。已读是另一个独立字段。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">重复标记已读、重复取消都返回当前状态而不是报错，这样响应丢了可以放心重试。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>饮食</h3>
+          <span class="path">life/diet · DietPanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>食材库、食谱（含分量与基准份数）、每周三餐、购物清单、库存盘点</li>
+          <li>采购建议：按本周菜单计算需求量，扣除库存和已确认量，生成可勾选的预览</li>
+          <li>一餐可记最多 30 道菜，每道要么关联食谱、要么手写菜名，可混用并保序</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">数量用定点小数（十进制字符串，最多 3 位），内部存整数千分位，拒绝浮点和科学计数法。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">kg 折 g、l 折 ml 用于聚合，但克与毫升、个与份之间不换算——不猜密度。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">手写菜名说明吃什么，不说明要买什么，所以不参与采购计算。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">确认采购需要携带预览摘要；菜单、食谱、库存、清单任何一项变化都会让预览失效，必须重新看一遍。</div></div>
+          <div class="rule"><span class="mark">05</span><div class="body">一餐引用的食谱若被移入回收站或改为私密，整餐隐藏，避免通过三餐泄露隐藏资料的存在。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>财务</h3>
+          <span class="path">life/finance · FinancePanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>收入 / 支出分类、记账、按分类的月度预算、按币种汇总的月报表</li>
+          <li>支持 CNY / USD / EUR / JPY；条目回收站；明文账本导入导出</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">金额在接口层只接受字符串，内部存整数最小单位，从根上避开浮点误差。JPY 限定 0 位小数。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">分类方向创建后不可改——改了会让历史记账的收支颠倒。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">报表不做汇率换算，各币种分开汇总。要不要合并是人的判断，不是系统的猜测。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">导入只追加；若同一 ID 已存在且内容不同，整批拒绝而不是覆盖。</div></div>
+          <div class="rule"><span class="mark">05</span><div class="body">账本不进搜索、不进 AI、不进普通资料导出。导出是独立动作，且明确提示输出是未加密 JSON。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>运动</h3>
+          <span class="path">life/exercise · ExercisePanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>按月查看训练计划与实际记录，两类是独立事实</li>
+          <li>计划可关联任务或日程；记录可关联本月计划</li>
+          <li>按运动类型汇总次数、时长、距离</li>
+        </ul>
+        <div class="rule"><span class="mark">01</span><div class="body">统计只来自实际记录，计划写多少都不计入。</div></div>
+        <div class="rule"><span class="mark">02</span><div class="body">关联的任务或日程后来被删除时，该字段显示为空而不是整行消失，历史记录不因上游变化而丢失。</div></div>
+        <div class="rule"><span class="mark">03</span><div class="body">单月返回上限 1001 行，超出直接报错而不是让本机服务卡住。</div></div>
+      </article>
+    </section>
+
+    <section class="chapter" id="learning">
+      <div class="chapter-head"><h2>学习与项目</h2><span class="tag">目标 · 路线 · 知识点 · 项目 · 外部工具</span></div>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>学习</h3>
+          <span class="path">learning · LearningPanel.vue</span>
+        </div>
+        <p>三层结构：学习目标 → 学习路线 → 知识点树。知识点可任意层级嵌套，同一路线内保持父子关系。</p>
+        <ul class="plain tight">
+          <li>验收：四档掌握度，每次验收生成不可变快照（标准、结论、证据的版本与哈希）</li>
+          <li>学习会话：记录起止时间与反思笔记，不影响掌握度</li>
+          <li>练习：从知识点一键创建真实任务并建立关联</li>
+          <li>路线复盘：保存为不可变 Markdown 笔记</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">时长不等于掌握。任何会话都不会自动改变掌握度。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">标为「已验收」必须同时满足：节点有验收标准，且至少一条有效成果证据——正文非空的笔记，或已完成的任务。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">证据后来被修改，验收记录保持原样，并在上下文里标注「资料已修改，证据保持原版本」。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">证据资源不再可见时，该次验收整体隐藏，节点掌握度显示为不可用而不是泄漏证据存在。</div></div>
+          <div class="rule"><span class="mark">05</span><div class="body">知识点创建后不能跨路线移动；父子链检测环，深度上限 64。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>项目</h3>
+          <span class="path">projects · ProjectPanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>项目五态、里程碑、共享任务、项目日志、资源关联、最近打开</li>
+          <li>任务可以从项目内新建，也可以关联已有任务（一个任务只属于一个项目）</li>
+          <li>本地目录只做元数据检查：绝对路径、逐段不跟随符号链接、不读文件内容</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">进度只统计项目内仍在进行、未被取消的任务；没有任务时显示「暂无任务」而不是 0%。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">里程碑是否达成由人手动判定，不因任务全部完成而自动标记。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">归档是只读保护：归档后不能再改里程碑、任务、日志与关联，但可以改回进行中。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">从项目里「移出」任务或笔记只删除关联，原记录原样保留。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>项目工具</h3>
+          <span class="path">projects/tools.py · ToolLauncher.vue</span>
+        </div>
+        <p>在项目里启动本机的终端、编辑器和 codex。这是整个系统安全边界最重的地方，实现上有明确取舍。</p>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">只支持固定适配器与固定候选路径。不接受用户自定义命令、shell、可执行路径或提示词。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">启动前先预览完整参数和目录，60 秒内确认；同一预览只能启动一次，网络异常后不会重复启动。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">真正启动时用固定环境变量、固定 PATH、独立会话，shell 关闭。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">界面直接说明：这提供的是可控启动，不是恶意代码沙箱。</div></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="chapter" id="library">
+      <div class="chapter-head"><h2>资料库与知识</h2><span class="tag">笔记 · 私密库 · 文献 · 目录 · 搜索 · 删除</span></div>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>笔记</h3>
+          <span class="path">library/notes · NotePanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>四种类型；Markdown 实时双栏预览；标签、检索、回收站</li>
+          <li>每次保存生成不可变修订文件，可查看历史并「放回草稿」</li>
+          <li>单篇下载 Markdown；整库导出 ZIP（含清单与哈希）</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">保存时要同时带版本号和正文哈希；两者任一不符就报冲突，并提供「另存为新笔记」的出路。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">正文文件是事实，数据库只存指针。写入采用「先落文件并校验、再提交数据库」的顺序，宁可留孤儿文件也不留悬空记录。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">自检默认只读：能报告缺失或冲突，但不会自动「修好」，因为自动修复可能覆盖真实内容。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>私密库</h3>
+          <span class="path">library/notes/vault.py · VaultPanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>独立密码初始化，之后解锁、改密、手动锁定</li>
+          <li>两种私密类型；支持浏览阅读态与编辑态</li>
+          <li>每次保存把标题、正文、日期追加进加密的修订列表</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">Scrypt 派生密钥 + AES-256-GCM，密码从不落盘、不进 URL 和配置。文件被外部改动会立即检测到并锁定。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">空闲 5 分钟自动锁，单次解锁最长 30 分钟；切到别的标签页、离开页面、登出、停服都会主动锁定并清空草稿。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">同一个浏览器会话也要重新输密码才能解锁；另一个标签页不能「蹭」解锁状态。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">失败次数指数退避，最长等待 30 秒。</div></div>
+          <div class="rule"><span class="mark">05</span><div class="body">容量 16 MiB、最多 1000 条。代价是整个库每次整体重写——换来密文边界清晰、备份简单。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>文献</h3>
+          <span class="path">library/documents · DocumentPanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>导入 PDF / EPUB，自动提取文本进入全文检索</li>
+          <li>元数据、阅读进度、书签、回收站、原件下载</li>
+          <li>可交给外部阅读器打开（带预览确认）</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">格式按文件头字节判断，不看扩展名，直接消除「改后缀绕过解析器」的路。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">PDF 解析跑在受限子进程里：内存、CPU、文件大小、进程数都有上限，禁网、禁 ptrace、禁 fork。沙箱不可用时直接失败，不降级。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">EPUB 按不可信压缩包处理：条目数、单条大小、总量、压缩比四重上限防 zip 炸弹；含 DOCTYPE 或 ENTITY 的 XML 一律拒绝。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">内容寻址存储，同哈希自动去重，但不会通过去重暴露隐藏或已删除文献的存在。</div></div>
+          <div class="rule"><span class="mark">05</span><div class="body">提取任务中断三次判失败，不会无限重排队；异常一定落终态，不会永久卡在「进行中」。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>书籍 / 网页 / 课程</h3>
+          <span class="path">library/catalog.py · CatalogPanel.vue</span>
+        </div>
+        <p>不需要文件的资料：书籍记录作者、ISBN、页数与阅读进度、星级；网页收藏记录 URL 与摘要；课程用「单元」而非页数表达进度。三类都有回收站、标签与分类筛选。</p>
+        <p class="note">进度由当前页 / 总页数强制计算，当前页不能超过总数；课程完成单元也不能超过总数。URL 只接受 http/https，不允许带用户名密码。</p>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>统一资源、关联与集合</h3>
+          <span class="path">knowledge/service.py · ResourceContext.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>跨类型浏览与检索，每种资源有统一详情页</li>
+          <li>四种关联类型，出链与反链；Markdown 正文里的链接也会计入反链</li>
+          <li>集合：有序成员，可拖排、可移除</li>
+        </ul>
+        <div class="rule"><span class="mark">01</span><div class="body">关联类型有约束：「练习」只能是知识点指向任务，「材料」只能是特定资料类型，「产出」只能是笔记或文献。</div></div>
+        <div class="rule"><span class="mark">02</span><div class="body">集合不能嵌套集合、不能包含自己；被隐藏或删除的旧成员保留在末尾，不会被静默移除。</div></div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>全文搜索</h3>
+          <span class="path">knowledge/search.py · SearchPanel.vue</span>
+        </div>
+        <p>中文不需要分词：索引使用 SQLite FTS5 的三元组模式，三个字以上按字符三元组匹配，一到两个字退回字面扫描兜底。索引可以随时重建。</p>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">读时二次校验：命中后重新核对隐私、删除状态、资源版本、血统可见性，笔记和文献还会重算磁盘文件哈希，任一不符就丢弃该结果。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">片段在数据库侧只投影 300 字符窗口，不会因为一次搜索把整个语料读进内存。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>回收站与永久删除</h3>
+          <span class="path">knowledge/purge.py · PurgeDialog.vue</span>
+        </div>
+        <p>删除默认是软删除。永久删除是唯一例外，流程强制：先预览影响范围，再检查跨资源引用，最后按版本号执行。</p>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">只能对已在回收站里的资源执行；被日程、运动计划、餐次、项目日志、学习复盘等引用时整体拒绝，不删任何行、不碰磁盘。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">文献原件仍被其他文献共享时也拒绝。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">先删数据库行、事务提交后再删文件；失败只会留下可人工清理的孤儿文件，不会留悬空记录。</div></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="chapter" id="intelligence">
+      <div class="chapter-head"><h2>情报与 AI</h2><span class="tag">采集 · 趋势 · 定时 · 单轮问答</span></div>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>技术情报</h3>
+          <span class="path">intelligence · IntelligencePanel.vue</span>
+        </div>
+        <ul class="plain tight">
+          <li>四类来源：RSS / Hacker News / arXiv / Hugging Face</li>
+          <li>每源可设自己的查询词，卡片显示当前查询词，有独立的「采集」按钮</li>
+          <li>列表内联显示星标、分叉、得分的变化曲线</li>
+          <li>收藏、稍后读、已读、领域整理、关键词订阅、周报草稿</li>
+          <li>定时采集：默认关闭，每天可配 1–24 个时刻</li>
+        </ul>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">每类来源的查询词形态不同：arXiv 拼进检索式，HN 用于过滤标题正文，RSS 就是订阅地址。留空则回退到该来源的默认列表，不会变成任意 URL。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">趋势只在同一来源、同名指标之间算差值，不合成统一热度分；Hugging Face 的 trending 不是累计量，因此不画增长曲线。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">定时采集先标记槽位再执行，崩溃或重启不会重复补跑同一时刻。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">每类来源每次采集都保留原始响应的完整快照与哈希，条目是它的投影。</div></div>
+          <div class="rule"><span class="mark">05</span><div class="body">同源 60 秒冷却、全局同一时刻只跑一个、单次 120 秒超时；单个条目失败记为部分成功，不拖垮整次采集。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>AI 助手</h3>
+          <span class="path">assistant · AssistantPanel.vue</span>
+        </div>
+        <p>可配置任意兼容 Chat Completions 的接口，默认关闭。每次提问都显式选择资料，发送前必须预览确认。</p>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">只读、无工具、无历史。请求体只有「问题 + 选定资料」，不含工具定义、会话历史或数据库访问。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">上下文上限：最多 8 项，每项截断到 6000 字符，总计 24000 字符。私密库、财务、运动永远不能作为上下文。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">预览有效期 300 秒，绑定当前会话；确认时必须带上预览摘要，摘要不符即失效。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">确认时会重新构造上下文：任何资料被修改、隐藏或配置变化，预览立即作废，必须重新看一遍。</div></div>
+          <div class="rule"><span class="mark">05</span><div class="body">密钥单独存文件（目录 0700、文件 0600、只存 UUID 指针），不进备份、不进导出、不回显。</div></div>
+          <div class="rule"><span class="mark">06</span><div class="body">回答只存在内存；来源变了就显示「结果不可用」，不会展示陈旧回答。</div></div>
+          <div class="rule"><span class="mark">07</span><div class="body">全局只允许一个请求在跑，避免误触同时烧钱。</div></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="chapter" id="review">
+      <div class="chapter-head"><h2>搁置与复盘</h2><span class="tag">最近两个功能</span></div>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>搁置的事</h3>
+          <span class="path">knowledge/stalled.py · StalledWidget.vue</span>
+        </div>
+        <p>首页在「今天」之后列出一节：按最后一次真实变动的时间，列出长期没推进的任务、学习节点与项目，最久的排在最前。</p>
+        <div class="rules">
+          <div class="rule"><span class="mark">01</span><div class="body">信号是「距最后一次真实变化的天数」，不是截止日期。一件事可以离截止还有三个月却一直被你回避。</div></div>
+          <div class="rule"><span class="mark">02</span><div class="body">每类有自己的期限：任务 7 天、知识点 14 天、路线 21 天、目标 30 天、项目 14 天。</div></div>
+          <div class="rule"><span class="mark">03</span><div class="body">练习算作进展：知识点最近有练习或验收记录就不算搁置，只是点开看一眼不算。</div></div>
+          <div class="rule"><span class="mark">04</span><div class="body">从没变动过的记录按创建时间算，并在说明里标明用的是哪一个，不估算。</div></div>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-head">
+          <h3>复盘处置</h3>
+          <span class="path">knowledge/reviews.py · 迁移 0017</span>
+        </div>
+        <p>每一行可以直接给出四种处置，结果落在各模块本来就有的字段上，没有另造一套排期模型。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>处置</th><th>任务</th><th>项目</th><th>知识点</th></tr></thead>
+            <tbody>
+              <tr><td>完成</td><td>置为已完成</td><td>置为已完成</td><td>—（须走验收）</td></tr>
+              <tr><td>继续</td><td>改计划日</td><td>改目标日，恢复进行中</td><td>只定再看日期</td></tr>
+              <tr><td>以后再说</td><td>按其节奏再来问</td><td>同左</td><td>同左</td></tr>
+              <tr><td>放弃</td><td>置为已取消</td><td>归档</td><td>移入回收站</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <b>最要紧的一条</b>
+          「以后再说」不碰最后变动时间。如果推迟被当成一次改动，所有被扫过一眼的东西都会显示成「刚刚动过」，停滞视图就再也分不出「真的在推进」和「只是被我看过」。
+        </div>
+        <p class="note">知识点不提供「完成」按钮：它要通过带验收标准快照与证据的验收才算数，在这里加个打勾等于允许伪造验收。放弃是唯一会问一次确认的处置。</p>
+      </article>
+    </section>
+
+    <section class="chapter" id="foundation">
+      <div class="chapter-head"><h2>底座与安全</h2><span class="tag">会话 · 数据完整性 · 出站 · 备份</span></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>能力</th><th>实现方式</th></tr></thead>
+          <tbody>
+            <tr><td>仅本机访问</td><td>只绑定 127.0.0.1；启动生成一次性入口凭据，换取 HttpOnly + SameSite=Strict 会话，凭据用完即失效，不写日志</td></tr>
+            <tr><td>会话有效期</td><td>连续 8 小时无操作才需重新进入，绝对上限 7 天；服务重启即失效</td></tr>
+            <tr><td>CSRF 与来源校验</td><td>所有写请求校验 CSRF 令牌；同源校验，不使用通配 CORS；GET 无副作用</td></tr>
+            <tr><td>出站网络</td><td>只允许 HTTPS 443、无凭据、非内网地址；解析出的所有 IP 都必须是全球可路由，连接时固定到已校验的 IP，禁代理禁重定向</td></tr>
+            <tr><td>启动不建库</td><td>服务启动时既不创建也不迁移数据库；库缺失或版本不符一律 503，宁可打不开也不生成一个空库掩盖数据丢失</td></tr>
+            <tr><td>数据完整性</td><td>连接默认只读，写事务用 BEGIN IMMEDIATE；外键开启；每个写操作用幂等键 + 版本号</td></tr>
+            <tr><td>备份与恢复</td><td>数据库 + 笔记 + 私密库 + 文献一致性快照；恢复只恢复到全新隔离目录，绝不覆盖活动路径</td></tr>
+            <tr><td>迁移升级</td><td>升级前自动备份并在副本上演练；审计逐表核对列清单与行摘要，任一不符即回滚</td></tr>
+            <tr><td>日志</td><td>轮转文件保持 0600；SQL 参数在错误信息里隐藏；请求 ID 同时返回并写入日志</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warn">
+        <b>迁移为什么只能加表</b>
+        升级审计会在升级前后对比每一张既有表的列清单和行摘要。这意味着新功能不能给既有表加列，新事实必须放在新表里。这条限制曾经拦下过两次实现尝试，也拦下了两个后来被发现是缺陷的升级路径。
+      </div>
+    </section>
+
+    <section class="chapter" id="quality">
+      <div class="chapter-head"><h2>工程质量</h2><span class="tag">测试 · 契约 · 后台任务</span></div>
+      <div class="stats">
+        <div class="stat"><b>340</b><span>后端测试，27 个测试文件</span></div>
+        <div class="stat"><b>89</b><span>前端测试，14 个测试文件</span></div>
+        <div class="stat"><b>67</b><span>旧工具与数据安全测试</span></div>
+        <div class="stat"><b>228</b><span>后端错误码，193 条已配用户文案</span></div>
+      </div>
+      <ul class="plain">
+        <li><b>错误码契约</b>：有一条测试静态扫描后端所有错误码，要求每个都在前端文案表里有对应说明，防止后端报错、界面只显示一个代码。</li>
+        <li><b>测试加载真实组件</b>：前端测试直接编译并挂载真实的 <code>.vue</code> 与 <code>.ts</code> 文件，断言行为契约，而不是对着手写的桩断言界面文案。</li>
+        <li><b>四个后台任务</b>：提醒投递、文献提取、搜索索引增量刷新、情报定时采集。各自有单实例文件锁，第二个进程进入待命；异常一律落终态。</li>
+        <li><b>错误码只给代码</b>：服务端返回 <code>code</code> 与 <code>request_id</code>，文案全在前端静态字典。好处是输入内容永远不会在错误里回显，日志也只记 ID。</li>
+        <li><b>静态检查</b>：<code>vue-tsc</code> 类型检查与生产构建是验收的一部分，不是可选项。</li>
+      </ul>
+    </section>
+
+    <section class="chapter" id="gaps">
+      <div class="chapter-head"><h2>已知边界</h2><span class="tag">刻意没做的，和还没做的</span></div>
+      <p>区分这两类很重要：有些是设计决定，有些是遗留问题。</p>
+      <h3>刻意不做</h3>
+      <ul class="plain">
+        <li><b>AI 不保存历史、不做多轮对话。</b>每次请求都是「明确选定的少量证据 + 单个问题」，用一次性预览把发送变成可复核的动作。</li>
+        <li><b>不做自动扣库存。</b>饮食的计划、采购、库存是三类事实，自动扣减会让它们互相污染。</li>
+        <li><b>不做重复提醒规则。</b>提醒是一次性的，没有 RRULE；恢复一个已删除的任务也不会自动重建提醒。</li>
+        <li><b>不做系统通知。</b>提醒只进站内收件箱。</li>
+        <li><b>财报不做汇率换算。</b>各币种分开汇总，合并与否交给人判断。</li>
+        <li><b>里程碑不自动达成。</b>任务完成率是派生的，里程碑是否达成由人判定。</li>
+      </ul>
+      <h3>还没做</h3>
+      <ul class="plain">
+        <li><b>AI 连续问答。</b>当前架构是三处限制：每次请求只有一条消息、结果只存内存、全局一次只能跑一个。改造需要决定是否跨重启保留对话，而这会多存一份含资料原文的内容。</li>
+        <li><b>情报双语简介。</b>把情报摘要发到翻译服务属于对外发送内容，需要先明确同意。界面已能显示第二语言摘要，为空时不显示。</li>
+        <li><b>饮食库存自动扣减与低库存提醒。</b>已按你的要求搁置。</li>
+        <li><b>本地音乐、本地模型部署。</b>已明确取消。</li>
+      </ul>
+      <div class="callout">
+        <b>关于「未做真实浏览器验收」</b>
+        历史文档里多处写着某些版本「未做真实浏览器验收」。本次交付的两个功能（搁置视图、复盘处置）和弹窗层级修复都在隔离数据根上用真实浏览器走过完整流程并核对过截图；更早的版本以当时的记录为准。
+      </div>
+    </section>
+
+    <footer>
+      <div>Personal Hub v0.14.2 · schema 0017_stalled_reviews · 仅本机运行</div>
+      <div>本报告依据源码现状整理，引用位置以 <code>模块/文件</code> 形式标注，便于逐条核对。</div>
+    </footer>
+  </main>
+</div>
