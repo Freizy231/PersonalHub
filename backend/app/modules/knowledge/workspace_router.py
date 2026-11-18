@@ -68,8 +68,8 @@ async def draft_plan(cid: UUID, payload: PlanDraft, request: Request, session=De
 
     workspace = service(request)
     scope = str(payload.scope_id) if payload.scope_id else None
-    if not workspace.executor.granted(scope):
-        raise HubError('CAPABILITY_SCOPE_DENIED', 403)
+    # Drafting a plan writes no business data, so it does not need the local-write grant.
+    # The grant is checked again when the plan is adopted, which is the moment it matters.
     gateway = request.app.state.model_gateway
     if not gateway.available():
         raise HubError('AI_DISABLED', 409)

@@ -320,6 +320,58 @@ test('the AI workspace turns a candidate plan into real records only when adopte
   view.app.unmount()
 })
 
+test('an ungranted goal can still be planned for, and says so before adopting', async () => {
+  const writes = []
+  setHandler(async (path, options) => {
+    if (options) {
+      writes.push(path)
+      if (path === '/ai/conversations') return { id: 'c1' }
+      if (path.endsWith('/plan')) return { id: 'p1', title: '认知提升计划', rationale: '读、复述、写',
+        rejected: [], steps: [{ position: 0, capability_id: 'learning.node.create', arguments: { title: '读一本入门书' }, state: 'pending' }] }
+      return {}
+    }
+    if (path.startsWith('/learning/learning_goal')) return { items: [{ id: 'g2', title: '个人认知提升', version: 1 }] }
+    if (path === '/ai/grants') return { items: [
+      { id: 'g', kind: 'outbound', scope_id: null, active: true }] }   // send allowed, write not
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/assistant/WorkspacePanel.vue', { enabled: true })
+  await flush(); await flush()
+
+  assert.match(view.text(), /还没有开启写入授权/, 'the state is stated up front')
+  assert.match(view.text(), /设置 → AI 权限/, 'and it says exactly where to fix it')
+
+  const area = view.nodes().find(n => n.tag === 'textarea')
+  area.value = '我想提升认知'
+  area.events.input?.({ target: area })
+  await flush()
+  await view.button('生成计划草稿').props.onClick(); await flush(); await flush()
+
+  assert.ok(writes.some(p => String(p).endsWith('/plan')), 'drafting is not blocked by a missing grant')
+  assert.match(view.text(), /认知提升计划/)
+  const adoptButton = view.nodes().find(n => n.tag === 'button' && /采用计划/.test(require('./harness.cjs').text(n)))
+  assert.ok(adoptButton)
+  assert.equal(adoptButton.props.disabled, true, 'adopting is disabled until the goal is authorized')
+  view.app.unmount()
+})
+
+test('without outbound permission the workspace explains what to turn on instead of failing', async () => {
+  setHandler(async (path) => {
+    if (path.startsWith('/learning/learning_goal')) return { items: [{ id: 'g3', title: '个人认知提升', version: 1 }] }
+    if (path === '/ai/grants') return { items: [] }
+    return { items: [] }
+  })
+  resetToasts()
+  const view = mountComponent('modules/assistant/WorkspacePanel.vue', { enabled: true })
+  await flush(); await flush()
+  assert.match(view.text(), /允许把资料发送给模型服务/, 'the permission is named exactly as in settings')
+  assert.match(view.text(), /只发送你选定的内容/, 'and says what it actually covers')
+  const button = view.nodes().find(n => n.tag === 'button' && /生成计划草稿/.test(require('./harness.cjs').text(n)))
+  assert.equal(button.props.disabled, true, 'the action is disabled rather than tried and failed')
+  view.app.unmount()
+})
+
 test('without a learning goal the workspace says where to start', async () => {
   setHandler(async () => ({ items: [] }))
   resetToasts()

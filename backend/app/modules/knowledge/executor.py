@@ -90,8 +90,10 @@ class Executor:
                 self._set_run(run_id, 'partial' if finished else 'failed', 'CAPABILITY_UNKNOWN')
                 return self.status(run_id, owner)
             if spec.effect in ('create', 'update') and not self.granted(scope_id):
-                self._finish_step(step, 'failed', 'CAPABILITY_SCOPE_DENIED')
-                self._set_run(run_id, 'partial' if finished else 'failed', 'CAPABILITY_SCOPE_DENIED')
+                # A missing grant is not the same refusal as touching something out of scope,
+                # and it must read that way: the fix is to authorize, not to change the ask.
+                self._finish_step(step, 'failed', 'AI_LOCAL_WRITE_NOT_GRANTED')
+                self._set_run(run_id, 'partial' if finished else 'failed', 'AI_LOCAL_WRITE_NOT_GRANTED')
                 return self.status(run_id, owner)
             self._start_step(step)
             try:

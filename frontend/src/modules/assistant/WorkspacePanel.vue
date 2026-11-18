@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../shared/api'
 import { errorMessage } from '../../shared/resource'
 import HubButton from '../../shared/HubButton.vue'
@@ -28,6 +28,10 @@ const run = ref<Run>()
 const busy = ref('')
 const error = ref('')
 const review = ref<any>()
+/** Whether this goal may be written to. Drafting works either way; adopting needs it. */
+const granted = ref(false)
+/** Whether content may be sent to the model at all. Drafting needs this one. */
+const outbound = ref(false)
 
 const capabilityNames: Record<string, string> = {
   'learning.goal.create': '创建学习目标',
@@ -42,12 +46,25 @@ function stepName(id: string) { return capabilityNames[id] || id }
 async function load() {
   busy.value = 'load'; error.value = ''
   try {
-    const [found] = await Promise.all([api<{ items: Goal[] }>('/learning/learning_goal?limit=100')])
+    const [found, grants] = await Promise.all([
+      api<{ items: Goal[] }>('/learning/learning_goal?limit=100'),
+      api<{ items: { kind: string; scope_id: string | null; active: boolean }[] }>('/ai/grants'),
+    ])
     goals.value = found.items
     if (!scope.value && goals.value.length) scope.value = goals.value[0]!.id
+    refreshGrant(grants.items)
   } catch (reason) { error.value = errorMessage(reason) }
   finally { busy.value = '' }
 }
+
+let grantCache: { kind: string; scope_id: string | null; active: boolean }[] = []
+function refreshGrant(items?: { kind: string; scope_id: string | null; active: boolean }[]) {
+  if (items) grantCache = items
+  granted.value = grantCache.some(g => g.kind === 'local_write' && g.active && g.scope_id === scope.value)
+  outbound.value = grantCache.some(g => g.kind === 'outbound' && g.active)
+}
+// Switching goals switches the authorization too; the state must follow the selection.
+watch(scope, () => refreshGrant())
 
 async function makePlan() {
   if (!scope.value || !question.value.trim()) { error.value = '请先选择学习目标并写下你的想法。'; return }
@@ -109,7 +126,7 @@ onMounted(load)
     <template v-else>
       <label class="form-field">
         <span>学习目标</span>
-        <select v-model="scope">
+        <select v-model="scope" @change="refreshGrant()">
           <option v-for="goal in goals" :key="goal.id" :value="goal.id">{{ goal.title }}</option>
         </select>
       </label>
@@ -124,8 +141,19 @@ onMounted(load)
         <input v-model="intent" maxlength="4000" placeholder="例如：优先使用我已有的资料；周末不安排。" />
       </label>
 
+      <p v-if="!outbound || !granted" class="fine-print notice-line">
+        <template v-if="!outbound">
+          还没有授权把内容发送给模型服务，因此暂时不能生成计划。到
+          <router-link class="text-link" to="/settings">设置 → AI 权限</router-link>
+          开启「允许把资料发送给模型服务」；它只发送你选定的内容。
+        </template>
+        <template v-else>
+          这个目标还没有开启写入授权，可以先生成计划看一看。采用前需要在
+          <router-link class="text-link" to="/settings">设置 → AI 权限</router-link> 里为它开启。
+        </template>
+      </p>
       <div class="panel-actions">
-        <HubButton variant="primary" :loading="busy === 'plan'" @click="makePlan">生成计划草稿</HubButton>
+        <HubButton variant="primary" :loading="busy === 'plan'" :disabled="!outbound" @click="makePlan">生成计划草稿</HubButton>
         <HubButton variant="quiet" :loading="busy === 'review'" @click="loadReview">看看进展</HubButton>
       </div>
 
@@ -144,7 +172,7 @@ onMounted(load)
         </p>
         <div class="panel-actions">
           <HubButton variant="quiet" @click="plan = undefined">放弃</HubButton>
-          <HubButton variant="primary" :loading="busy === 'adopt'" @click="adopt">采用计划</HubButton>
+          <HubButton variant="primary" :loading="busy === 'adopt'" :disabled="!granted" @click="adopt">采用计划</HubButton>
         </div>
       </section>
 
@@ -178,4 +206,5 @@ onMounted(load)
 .plan-box h2, .run-box h2 { font-size: var(--step-2); margin: 0 0 var(--space-2); }
 .plan-steps { margin: 0; padding-left: 1.2rem; display: grid; gap: var(--space-1); }
 .warning-text { color: var(--warning); }
+.notice-line { margin: 0; padding: var(--space-2) var(--space-3); background: var(--surface-2); border-radius: var(--radius-sm); }
 </style>

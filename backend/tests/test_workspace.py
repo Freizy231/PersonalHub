@@ -111,6 +111,32 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(node['kind'], 'knowledge_node')
         self.assertEqual(node['title'], '向量检索')
 
+    def test_a_plan_that_creates_its_own_route_binds_every_later_step_to_it(self):
+        """The route is created by step 0, not chosen in advance; later steps must follow it."""
+        self.grant()
+        steps = [
+            {'capability_id': 'learning.path.create',
+             'arguments': {'goal_id': '$goal', 'title': '认知基础'}},
+            {'capability_id': 'learning.node.create',
+             'arguments': {'path_id': '$path', 'title': '读一本认知科学入门',
+                           'acceptance_criteria': '能复述三个核心概念'}},
+            {'capability_id': 'learning.practice.create',
+             'arguments': {'node_id': '$node0', 'title': '写一段自己的理解'}},
+        ]
+        plan = self.plan_from(steps)
+        self.assertEqual(len(plan['steps']), 3)
+        result = self.workspace.adopt(plan['id'], 'owner-1')
+        self.assertEqual(result['status'], 'success',
+                         'a self-created route must be bindable; slots are counted before the append')
+        route_id = result['steps'][0]['resource_ids'][0]
+        node_id = result['steps'][1]['resource_ids'][0]
+        task_id = result['steps'][2]['resource_ids'][0]
+        with connection(self.db) as c:
+            self.assertEqual(c.exec_driver_sql('SELECT path_id FROM knowledge_nodes WHERE resource_id=?',
+                                               (node_id,)).scalar_one(), route_id)
+            self.assertEqual(c.exec_driver_sql('SELECT node_id FROM learning_node_tasks WHERE task_id=?',
+                                               (task_id,)).scalar_one(), node_id)
+
     def test_the_practice_step_uses_the_node_the_same_plan_created(self):
         """A plan is written before anything exists; the practice step must bind at run time."""
         self.grant()
@@ -164,10 +190,34 @@ class WorkspaceTests(unittest.TestCase):
         plan = self.plan_from([{'capability_id': 'learning.node.create',
                                 'arguments': {'path_id': self.path['id'], 'title': '节点',
                                               'acceptance_criteria': 'x'}}])
-        result = self.workspace.adopt(plan['id'], 'owner-1')
-        self.assertEqual(result['status'], 'failed')
-        self.assertEqual(result['error_code'], 'CAPABILITY_SCOPE_DENIED')
+        with self.assertRaises(HubError) as caught:
+            self.workspace.adopt(plan['id'], 'owner-1')
+        self.assertEqual(caught.exception.code, 'AI_LOCAL_WRITE_NOT_GRANTED',
+                         'the reason is a missing grant, not an out-of-scope target')
         self.assertEqual(self.count('knowledge_nodes'), 0)
+
+    def test_drafting_a_plan_needs_no_write_grant(self):
+        """Drafting writes no business data, so an ungranted goal can still be planned for.
+
+        This is the case that felt broken: a brand-new goal has no grant yet, and asking for a
+        plan should produce one, not a refusal.
+        """
+        fresh = self.learning.save('learning_goal', Goal(title='个人认知提升',
+                                                        acceptance_criteria='能说明自己的变化'), key())
+        reply = json.dumps({'title': '认知提升四周计划', 'rationale': '读、复述、写',
+                            'steps': [
+                                {'capability_id': 'learning.path.create',
+                                 'arguments': {'goal_id': '$goal', 'title': '基础'}},
+                                {'capability_id': 'learning.node.create',
+                                 'arguments': {'path_id': '$path', 'title': '读一本认知科学入门',
+                                               'acceptance_criteria': '能复述三个核心概念'}},
+                            ]}, ensure_ascii=False)
+        plan = self.workspace.draft_plan(reply, None, fresh['id'])
+        self.assertEqual(len(plan['steps']), 2)
+        self.assertEqual(self.count('knowledge_nodes'), 0, 'drafting still writes nothing')
+        with self.assertRaises(HubError) as caught:
+            self.workspace.adopt(plan['id'], 'owner-1')
+        self.assertEqual(caught.exception.code, 'AI_LOCAL_WRITE_NOT_GRANTED')
 
     def test_revoking_a_grant_mid_run_stops_the_next_step(self):
         self.grant()
@@ -196,7 +246,8 @@ class WorkspaceTests(unittest.TestCase):
                                 'arguments': {'node_id': foreign['id'], 'title': '越界练习'}}])
         result = self.workspace.adopt(plan['id'], 'owner-1')
         self.assertEqual(result['status'], 'failed')
-        self.assertEqual(result['error_code'], 'CAPABILITY_SCOPE_DENIED')
+        self.assertEqual(result['error_code'], 'CAPABILITY_SCOPE_DENIED',
+                         'a real out-of-scope node keeps the scope refusal')
         self.assertEqual(self.count('tasks'), 0)
 
     def test_finance_and_exercise_are_never_available_as_sources(self):

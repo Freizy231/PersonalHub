@@ -209,6 +209,10 @@ class WorkspaceService:
             return {'run_id': existing[0], 'replayed': True, **self.executor.status(existing[0], owner)}
         if plan['state'] != 'draft':
             raise HubError('AI_PLAN_ALREADY_RESOLVED', 409)
+        if not self.executor.granted(plan['scope_id']):
+            # Checked here as well as per step, so the person gets one clear reason instead of
+            # an adopted-then-failed run. The per-step check stays as the revocation guard.
+            raise HubError('AI_LOCAL_WRITE_NOT_GRANTED', 403)
         steps, created_paths, created_nodes = self._resolve(plan['steps'])
         if not steps:
             raise HubError('AI_PLAN_EMPTY', 422)
@@ -229,10 +233,13 @@ class WorkspaceService:
         for step in plan_steps:
             arguments = dict(step['arguments'])
             ok = True
+            # Slot indices are 0-based positions in the list of *created* routes/nodes.
+            # Counting before this step's own creation is what makes "$path" in step 1 mean
+            # the route step 0 created, rather than an index one past the end.
             for field in ('path_id', 'goal_id', 'node_id'):
                 value = arguments.get(field)
                 if isinstance(value, dict) and '$created_path' in value:
-                    arguments[field] = {'$path_slot': len(paths)}
+                    arguments[field] = {'$path_slot': 0 if not paths else len(paths) - 1}
                 elif isinstance(value, dict) and '$created_node' in value:
                     arguments[field] = {'$node_slot': int(value['$created_node'])}
             if step['capability_id'] == 'learning.path.create':
