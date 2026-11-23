@@ -56,3 +56,30 @@ export interface MessageList {
   limit: number
   offset: number
 }
+
+/** 与后端 MemoryOut 对应（M4）。敏感级别当前只展示，不阻断外发。 */
+export interface MemorySource {
+  source_type: string
+  source_id: string | null
+  excerpt: string
+}
+
+export interface MemoryItem {
+  id: string
+  content: string
+  status: 'PROPOSED' | 'APPROVED' | 'REJECTED' | 'DELETED'
+  kind: 'SEMANTIC' | 'EPISODIC' | 'PROCEDURAL'
+  sensitivity: 'PUBLIC' | 'PERSONAL' | 'SENSITIVE' | 'SECRET'
+  confidence: number
+  created_at: string
+  updated_at: string
+  sources: MemorySource[]
+}
+
+export interface MemoryList {
+  items: MemoryItem[]
+  total: number
+  limit: number
+  offset: number
+  pending_count: number
+}

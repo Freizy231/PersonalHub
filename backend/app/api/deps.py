@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import PublicMessageError
 from app.repositories.conversations import ConversationRepository
+from app.repositories.memory import MemoryRepository
 from app.repositories.messages import MessageRepository
 
 
@@ -61,3 +62,10 @@ def get_message_repository(session: SessionDep) -> MessageRepository:
 
 ConversationRepoDep = Annotated[ConversationRepository, Depends(get_conversation_repository)]
 MessageRepoDep = Annotated[MessageRepository, Depends(get_message_repository)]
+
+
+def get_memory_repository(session: SessionDep) -> MemoryRepository:
+    return MemoryRepository(session)
+
+
+MemoryRepoDep = Annotated[MemoryRepository, Depends(get_memory_repository)]

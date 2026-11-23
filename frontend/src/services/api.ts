@@ -13,6 +13,8 @@ import type {
   Conversation,
   ConversationList,
   HealthResponse,
+  MemoryItem,
+  MemoryList,
   Message,
   MessageList,
   Result,
@@ -25,6 +27,8 @@ const DEFAULT_TIMEOUT_MS = 8_000
 
 /** 代理/网关层表示"后端不可达"的状态码。 */
 const GATEWAY_STATUS = new Set([502, 503, 504])
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 function isApiErrorBody(value: unknown): value is ApiErrorBody {
   if (typeof value !== 'object' || value === null) return false
@@ -109,8 +113,6 @@ async function request<T>(
   }
 }
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' }
-
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
@@ -118,15 +120,14 @@ export const api = {
     list: (limit = 50, offset = 0) =>
       request<ConversationList>(`/conversations?limit=${limit}&offset=${offset}`),
 
+    get: (id: string) => request<Conversation>(`/conversations/${encodeURIComponent(id)}`),
+
     create: (title: string) =>
       request<Conversation>('/conversations', {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ title }),
       }),
-
-    get: (id: string) =>
-      request<Conversation>(`/conversations/${encodeURIComponent(id)}`),
 
     rename: (id: string, title: string) =>
       request<Conversation>(`/conversations/${encodeURIComponent(id)}`, {
@@ -141,7 +142,8 @@ export const api = {
     messages: {
       list: (conversationId: string, limit = 200, offset = 0) =>
         request<MessageList>(
-          `/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}&offset=${offset}`,
+          `/conversations/${encodeURIComponent(conversationId)}/messages` +
+            `?limit=${limit}&offset=${offset}`,
         ),
 
       // 后端只接受 role="user"，这里也不发送 role，避免前端与后端契约漂移。
@@ -152,5 +154,29 @@ export const api = {
           body: JSON.stringify({ content }),
         }),
     },
+  },
+
+  memory: {
+    list: (status?: string, limit = 100, offset = 0) => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      if (status) params.set('status', status)
+      return request<MemoryList>(`/memory?${params.toString()}`)
+    },
+
+    approve: (id: string) =>
+      request<MemoryItem>(`/memory/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
+
+    reject: (id: string) =>
+      request<MemoryItem>(`/memory/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
+
+    update: (id: string, content: string) =>
+      request<MemoryItem>(`/memory/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ content }),
+      }),
+
+    remove: (id: string) =>
+      request<void>(`/memory/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 }

@@ -3,11 +3,13 @@ import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { ConversationDetailPage } from './pages/ConversationDetailPage'
 import { ConversationsPage } from './pages/ConversationsPage'
 import { HomePage } from './pages/HomePage'
+import { MemoryCenterPage } from './pages/MemoryCenterPage'
 
 /** 导航只列出已实现的页面，避免死链接（AGENT.md：不提前创建空模块）。 */
 const NAV_ITEMS = [
   { to: '/', label: '总览', end: true },
   { to: '/conversations', label: '会话', end: false },
+  { to: '/memory', label: '记忆', end: false },
 ]
 
 export default function App() {
@@ -35,6 +37,10 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/conversations/:conversationId" element={<ConversationDetailPage />} />
+          <Route path="/memory" element={<MemoryCenterPage filter="PENDING" />} />
+          <Route path="/memory/pending" element={<MemoryCenterPage filter="PENDING" />} />
+          <Route path="/memory/approved" element={<MemoryCenterPage filter="APPROVED" />} />
+          <Route path="/memory/rejected" element={<MemoryCenterPage filter="REJECTED" />} />
           <Route
             path="*"
             element={
@@ -50,7 +56,7 @@ export default function App() {
 
         <footer className="app__footer">
           <p>
-            当前处于 <strong>M2 — SQLite 持久化</strong> 阶段。
+            当前处于 <strong>M4 — 记忆引擎</strong> 阶段。
           </p>
           <p>数据默认留在本机，服务只监听回环地址。</p>
         </footer>

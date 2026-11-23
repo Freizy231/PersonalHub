@@ -135,3 +135,41 @@
 
 **验证**：用本地模拟中转站（路径 `/v1/chat/completions`，校验特定 Key）端到端验证：
 正确 Key 流式成功、错误 Key 返回明确的地址+Key 提示、`/v1` 前缀拼接正确。
+
+---
+
+## D-008：记忆携带敏感级别字段，但不阻断外发
+
+- 日期：2026-11-23
+- 状态：已实施（用户选择方案 B）
+- 关联：D-002（无 Data Egress 检查层）
+
+**决定**：`memory_items.sensitivity` 取 PUBLIC / PERSONAL / SENSITIVE / SECRET，
+在记忆中**存储并在界面展示**，但**不影响**是否随对话发送给模型。
+
+**理由**：用户选择"只存不拦"。现在保留字段，将来想按级别筛选、提醒或拦截时，
+历史数据已经有标注，不需要回填。
+
+**当前实际行为（必须如实告知）**：一条标记为 SENSITIVE 且已批准的的记忆，
+仍会完整进入模型上下文并发送给供应商。界面上用 tooltip 明确写出
+"仅用于标记，不会阻止该内容随对话发送给模型"，避免用户误判。
+
+**测试锚点**：`tests/test_memory.py::TestSensitivityField::test_sensitive_approved_memory_still_injected`
+固定了"不阻断"这一行为。将来要改为阻断，必须先修改该测试并同步本决策记录。
+
+---
+
+## D-009：记忆表采用单表 + 状态字段
+
+- 日期：2026-11-23
+- 状态：已实施
+- 规范条款：`AGENT.md` §5.1 列出 `memory_items` / `memory_sources` / `memory_proposals`，
+  并注明"按需建立"
+
+**决定**：用 `memory_items.status`（PROPOSED / APPROVED / REJECTED / DELETED）表达生命周期，
+不单独建 `memory_proposals` 表；来源仍独立为 `memory_sources`。
+
+**理由**：候选与正式记忆是同一实体的不同阶段，分两表会出现同一条记忆在两张表重复、
+状态不一致的问题。单表 + 状态机更容易保证"只有 APPROVED 能注入"这一核心约束。
+
+**回滚成本**：低。若将来需要拆分，可按 status 迁移记录，字段已齐全。

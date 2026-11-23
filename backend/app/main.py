@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 
-from app.api import chat, conversations, health, messages
+from app.api import chat, conversations, health, memory, messages
 from app.core.config import Settings, get_settings
 from app.core.errors import install_exception_handlers
 from app.core.logging import configure_logging
@@ -25,7 +25,7 @@ from app.storage.database import build_engine, build_session_factory
 logger = logging.getLogger(__name__)
 
 # 启动时必须存在的表。缺失说明数据库没跑过 Alembic 迁移。
-REQUIRED_TABLES = frozenset({"conversations", "messages"})
+REQUIRED_TABLES = frozenset({"conversations", "messages", "memory_items", "memory_sources"})
 
 
 def check_schema(engine) -> list[str]:  # type: ignore[no-untyped-def]
@@ -90,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, prefix=settings.api_prefix)
     app.include_router(conversations.router, prefix=settings.api_prefix)
     app.include_router(messages.router, prefix=settings.api_prefix)
+    app.include_router(memory.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app

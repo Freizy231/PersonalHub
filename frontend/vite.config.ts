@@ -2,7 +2,8 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 // 开发服务器只绑定回环地址（AGENT.md §4.2：不得默认监听 0.0.0.0）。
-const BACKEND_ORIGIN = 'http://127.0.0.1:8000'
+// 后端地址可用 PH_BACKEND_ORIGIN 覆盖，便于在备用端口上做端到端验证。
+const BACKEND_ORIGIN = process.env.PH_BACKEND_ORIGIN ?? 'http://127.0.0.1:8000'
 
 export default defineConfig({
   plugins: [react()],

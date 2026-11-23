@@ -81,7 +81,25 @@
 - [ ] 无模型选择 UI，模型由服务端配置固定
 - [ ] 未做真实 DeepSeek API 的端到端验证（需真实 Key，由用户手动完成）
 
-### M4 — Memory Engine Basic — 未开始
+### M4 — Memory Engine Basic — 已完成
+
+已完成：
+- [x] `memory_items`（status / kind / sensitivity / confidence / 内容指纹）+ `memory_sources`
+- [x] Alembic 迁移 `e9afe6c0ba28`，临时副本验证 upgrade/downgrade 往返
+- [x] 对话结束后后台提取候选（失败不影响对话）
+- [x] 模型输出按不可信数据校验：非法 kind/sensitivity 回落默认，confidence 截断
+- [x] **只有 APPROVED 进入模型上下文**；PROPOSED/REJECTED 绝不注入（含变异测试验证）
+- [x] 记忆作为"资料"注入，提示中声明不得当作指令执行（间接注入防护）
+- [x] 拒绝/删除后按内容指纹去重，不再重复提案
+- [x] 记忆 API：列表（按状态）、批准、拒绝、修改、删除；workspace 隔离
+- [x] 前端记忆中心：待审核/已批准/已拒绝三视图、批准、拒绝、修改、两段确认删除
+- [x] 界面明确告知"敏感标记不阻止外发"（D-008）
+- [x] 后端 212 项测试
+
+技术债：
+- [ ] 检索为 SQLite 结构化匹配，未做相关性排序（MVP 允许，见 §4.4）
+- [ ] 敏感级别不参与任何过滤（D-008）
+- [ ] 提取为条数/字符截断，无 token 预算管理
 
 ### M5 — Basic Agent & Read-only Tools — 未开始
 
