@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 def _env_str(name: str, default: str) -> str:
@@ -39,6 +40,24 @@ def _env_list(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
+def default_data_dir() -> Path:
+    """按 AGENT.md §5.3 计算用户数据目录。
+
+    Linux: $XDG_DATA_HOME/personal-hub，未设置时 ~/.local/share/personal-hub。
+    数据库绝不能放在源码仓库内。
+    """
+    xdg = os.environ.get("XDG_DATA_HOME", "").strip()
+    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+    return base / "personal-hub"
+
+
+def _env_path(name: str, default: Path) -> Path:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return Path(raw).expanduser()
+
+
 # Vite 开发服务器默认端口。生产形态下前端由后端同源提供，届时不需要 CORS。
 DEFAULT_DEV_ORIGINS = (
     "http://127.0.0.1:5173",
@@ -55,6 +74,13 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     allowed_origins: tuple[str, ...] = field(default=DEFAULT_DEV_ORIGINS)
+    # 字段默认值同样读取 PH_DATA_DIR（经 from_env_path），
+    # 避免 Settings() 与 Settings.from_env() 对同一环境变量给出不同结果。
+    data_dir: Path = field(default_factory=lambda: _env_path("PH_DATA_DIR", default_data_dir()))
+
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "db" / "personal-hub.db"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -62,6 +88,7 @@ class Settings:
             host=_env_str("PH_HOST", "127.0.0.1"),
             port=_env_int("PH_PORT", 8000),
             allowed_origins=_env_list("PH_ALLOWED_ORIGINS", DEFAULT_DEV_ORIGINS),
+            data_dir=_env_path("PH_DATA_DIR", default_data_dir()),
         )
 
 

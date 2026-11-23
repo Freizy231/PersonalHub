@@ -2,7 +2,7 @@
  * 后端 API 类型定义。
  *
  * 与后端 Pydantic 模型保持可验证一致（AGENT.md §9.1）。
- * M1 只有健康检查；后续可从 OpenAPI 生成，避免手工漂移。
+ * 后续可从 OpenAPI 生成，避免手工漂移。
  */
 
 export interface HealthResponse {
@@ -10,6 +10,21 @@ export interface HealthResponse {
   service: string
   version: string
   timestamp: string
+}
+
+/** 与后端 ConversationOut 对应。时间为 ISO 8601 + Z（UTC）。 */
+export interface Conversation {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationList {
+  items: Conversation[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface ApiErrorBody {

@@ -150,7 +150,7 @@ SSH 通路问题已排除：`github.com:22` 直连可用，无需 HTTPS + PAT �
 ```bash
 # 后端
 cd backend && uv run pytest -q
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 curl -fsS http://127.0.0.1:8000/api/v1/health
 
 # 前端

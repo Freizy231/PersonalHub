@@ -4,7 +4,9 @@ version = "0.0.1"
 description = "Personal Hub — Local-first personal AI environment (MVP)"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "alembic>=1.14,<2",
     "fastapi>=0.115,<1",
+    "sqlalchemy>=2.0,<2.1",
     "uvicorn>=0.34,<1",
 ]
 
@@ -27,6 +29,9 @@ addopts = "-q --strict-markers"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Alembic 自动生成的迁移文件格式不由我们控制；对其做格式检查只会产生噪声。
+# 迁移内容仍需人工审阅，这一点写在 docs/DEVELOPMENT.md 的迁移流程里。
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

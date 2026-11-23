@@ -4,7 +4,7 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 
 ## 当前状态
 
-项目处于 **M1 — Frontend/Backend Skeleton**（后端骨架已完成）。已确认技术选型：后端 Python + FastAPI，
+项目处于 **M2 — SQLite Persistence**（会话持久化已完成）。已确认技术选型：后端 Python + FastAPI，
 前端 **React + TypeScript + Vite**。
 
 > 历史版本 v0.14.2 与本项目无关联，不作为参考实现，其源码与数据不导入本项目。
@@ -19,6 +19,16 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - 配置默认绑定 `127.0.0.1`，可通过 `PH_HOST` / `PH_PORT` / `PH_ALLOWED_ORIGINS` 覆盖
 - 前端首页展示后端连接状态，支持重新检查、超时与断线提示，明暗自适应
 
+### 已完成（M2）
+
+- `conversations` / `messages` 表，Alembic 迁移管理，UUID 主键，workspace 作用域
+- 会话 CRUD API：`GET/POST /api/v1/conversations`、`GET/PATCH/DELETE /api/v1/conversations/{id}`
+- 消息随会话级联删除，外键约束真实生效
+- 前端会话管理面板：新建、重命名、两段确认删除，刷新后数据从数据库恢复
+- 数据库位于 `~/.local/share/personal-hub/db/`，不在源码仓库内
+
+数据库操作与迁移流程见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)。
+
 - 主规范：[`AGENT.md`](AGENT.md)（权威项目上下文、架构、里程碑与验收标准）
 - Agent 入口：[`AGENTS.md`](AGENTS.md)
 - 环境审计：[`docs/ENVIRONMENT_AUDIT.md`](docs/ENVIRONMENT_AUDIT.md)
@@ -29,8 +39,8 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | M0 | 仓库与环境审计 | 已完成 |
-| M1 | 前后端骨架 + 健康检查 | 进行中 |
-| M2 | SQLite 持久化 | 未开始 |
+| M1 | 前后端骨架 + 健康检查 | 已完成 |
+| M2 | SQLite 持久化 | 进行中 |
 | M3 | AI Workspace（接入模型） | 未开始 |
 | M4 | 记忆引擎基础 | 未开始 |
 | M5 | Agent Loop 与只读工具 | 未开始 |
@@ -69,7 +79,7 @@ cd frontend && npm ci && cd ..                # 前端：按 package-lock.json �
 
 ```bash
 # 后端 → http://127.0.0.1:8000
-cd backend && uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+cd backend && uv run uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --reload
 
 # 前端 → http://127.0.0.1:5173（开发期把 /api 代理到后端）
 cd frontend && npm run dev
@@ -78,7 +88,7 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（26 项：健康检查、错误结构、CORS 白名单、配置校验、日志脱敏）
+# 后端测试（78 项：健康检查、错误结构、CORS、配置、日志脱敏、会话 CRUD、迁移）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 
@@ -87,6 +97,12 @@ cd frontend && npm run build && npm run lint
 
 # 接口连通性
 curl -fsS http://127.0.0.1:8000/api/v1/health
+```
+
+首次运行或升级后需要建立/更新表结构：
+
+```bash
+cd backend && uv run alembic upgrade head
 ```
 
 接口文档（仅回环地址可达）：<http://127.0.0.1:8000/api/v1/docs>

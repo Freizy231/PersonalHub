@@ -75,7 +75,7 @@ fi
 
 echo "→ 启动后端 http://$HOST:$BACKEND_PORT"
 start_service backend "$ROOT/backend" \
-  .venv/bin/uvicorn app.main:app --host "$HOST" --port "$BACKEND_PORT" --reload
+  .venv/bin/uvicorn app.main:create_app --factory --host "$HOST" --port "$BACKEND_PORT" --reload
 
 # 等待后端就绪，避免前端首屏显示"未连接"造成误解。
 for _ in $(seq 1 60); do

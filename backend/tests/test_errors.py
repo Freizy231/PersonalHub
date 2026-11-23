@@ -12,16 +12,20 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from app.main import create_app
 
 
-def _app_with_boom_route():
-    app = create_app()
+def _app_with_boom_route(data_dir: Path):
+    # 必须注入临时数据目录：create_app() 会创建数据库文件，
+    # 若使用默认配置就会写进用户真实数据目录（AGENT.md §8.6）。
+    app = create_app(Settings(data_dir=data_dir))
     router = APIRouter()
 
     @router.get("/boom")
@@ -33,9 +37,10 @@ def _app_with_boom_route():
 
 
 @pytest.fixture()
-def boom_client() -> Iterator[TestClient]:
+def boom_client(tmp_path: Path) -> Iterator[TestClient]:
     # raise_server_exceptions=False 让 TestClient 返回真实 500 响应而不是抛出异常。
-    with TestClient(_app_with_boom_route(), raise_server_exceptions=False) as client:
+    app = _app_with_boom_route(tmp_path / "errors-test-data")
+    with TestClient(app, raise_server_exceptions=False) as client:
         yield client
 
 

@@ -1,8 +1,10 @@
+import { ConversationList } from './components/ConversationList'
 import { StatusCard } from './components/StatusCard'
 import { useHealth } from './hooks/useHealth'
 
 export default function App() {
   const { state, recheck } = useHealth()
+  const backendOnline = state.status === 'online'
 
   return (
     <main className="app">
@@ -13,9 +15,11 @@ export default function App() {
 
       <StatusCard state={state} onRecheck={recheck} checking={state.status === 'checking'} />
 
+      {backendOnline && <ConversationList />}
+
       <footer className="app__footer">
         <p>
-          当前处于 <strong>M1 — 前后端骨架</strong> 阶段。
+          当前处于 <strong>M2 — SQLite 持久化</strong> 阶段。
         </p>
         <p>数据默认留在本机，服务只监听回环地址。</p>
       </footer>

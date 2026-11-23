@@ -8,7 +8,13 @@
  *   同时保留 request_id 以便报障时与服务端日志对齐。
  */
 
-import type { ApiErrorBody, HealthResponse, Result } from '../types/api'
+import type {
+  ApiErrorBody,
+  Conversation,
+  ConversationList,
+  HealthResponse,
+  Result,
+} from '../types/api'
 
 const API_PREFIX = '/api/v1'
 
@@ -84,6 +90,11 @@ async function request<T>(
       }
     }
 
+    // 204 No Content（删除接口）没有响应体，不能调用 response.json()。
+    if (response.status === 204) {
+      return { ok: true, data: undefined as T }
+    }
+
     const data = (await response.json()) as T
     return { ok: true, data }
   } catch (error) {
@@ -96,6 +107,30 @@ async function request<T>(
   }
 }
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
 export const api = {
   health: () => request<HealthResponse>('/health'),
+
+  conversations: {
+    list: (limit = 50, offset = 0) =>
+      request<ConversationList>(`/conversations?limit=${limit}&offset=${offset}`),
+
+    create: (title: string) =>
+      request<Conversation>('/conversations', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ title }),
+      }),
+
+    rename: (id: string, title: string) =>
+      request<Conversation>(`/conversations/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ title }),
+      }),
+
+    remove: (id: string) =>
+      request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
 }
