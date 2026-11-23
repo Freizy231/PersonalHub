@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 
-from app.api import approvals, chat, conversations, health, memory, messages
+from app.api import approvals, chat, conversations, health, jobs, memory, messages
 from app.capabilities import ToolRegistry
 from app.capabilities.tools import register_builtin_tools
 from app.core.config import Settings, get_settings
@@ -23,6 +23,7 @@ from app.core.errors import install_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIDMiddleware
 from app.storage.database import build_engine, build_session_factory
+from app.workers.worker import Worker, builtin_handlers
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ REQUIRED_TABLES = frozenset(
         "tool_invocations",
         "tasks",
         "approvals",
+        "job_queue",
+        "task_runs",
+        "task_events",
     }
 )
 
@@ -69,7 +73,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "remedy": "cd backend && uv run alembic upgrade head",
                 },
             )
+        # 后台 Worker：在应用生命周期内运行，关掉浏览器不影响它。
+        # 数据库缺表时 Worker 会持续报错，因此只在表齐全时启动。
+        worker: Worker | None = None
+        if not missing:
+            worker = Worker(app.state.session_factory, app.state.handler_registry)
+            app.state.worker = worker
+            await worker.start()
+        else:
+            app.state.worker = None
+
         yield
+
+        if worker is not None:
+            await worker.stop()
         engine.dispose()
 
     app = FastAPI(
@@ -98,6 +115,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.session_grants = SessionGrants()
 
+    # 作业处理器：显式登记，不做自动发现（同工具注册表的原则）。
+    app.state.handler_registry = builtin_handlers()
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
@@ -116,6 +136,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(messages.router, prefix=settings.api_prefix)
     app.include_router(memory.router, prefix=settings.api_prefix)
     app.include_router(approvals.router, prefix=settings.api_prefix)
+    app.include_router(jobs.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app
