@@ -995,3 +995,298 @@ a.button:hover {
 .approval-card__actions button {
   padding: 7px 18px;
 }
+
+/* ---------- 任务中心 / 活动中心（M7） ---------- */
+
+.task-center,
+.activity-center {
+  margin-top: 28px;
+}
+
+.task-center__header,
+.activity-center__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-center__header h2,
+.activity-center__header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.task-center__count {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.task-center__notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+  border-radius: 8px;
+}
+
+.task-center__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0;
+}
+
+.task-center__filter {
+  padding: 6px 14px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
+
+.task-center__filter:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.task-center__filter.is-active {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+
+.task-center__empty,
+.activity-center__empty {
+  margin: 24px 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.job-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.job {
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.job--running {
+  border-left: 3px solid var(--warn);
+}
+
+.job--succeeded {
+  border-left: 3px solid var(--ok);
+}
+
+.job--failed,
+.job--cancelled {
+  border-left: 3px solid var(--err);
+}
+
+.job__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.job__type {
+  font-weight: 600;
+  font-size: 0.94rem;
+}
+
+.job__status {
+  padding: 1px 9px;
+  font-size: 0.76rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--border) 50%, transparent);
+  color: var(--text-muted);
+}
+
+.job__status--running {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
+}
+
+.job__status--succeeded {
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+  color: var(--ok);
+}
+
+.job__status--failed {
+  background: color-mix(in srgb, var(--err) 16%, transparent);
+  color: var(--err);
+}
+
+.job__meta {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.job__error {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  color: var(--err);
+  overflow-wrap: anywhere;
+}
+
+.job__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.job__actions button {
+  font-size: 0.84rem;
+  padding: 4px 12px;
+}
+
+.job__detail-link {
+  font-size: 0.84rem;
+  color: var(--accent);
+  text-decoration: none;
+  margin-right: auto;
+}
+
+.job__detail-link:hover {
+  text-decoration: underline;
+}
+
+/* 详情 */
+
+.activity-center__back {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.activity-center__back:hover {
+  color: var(--accent);
+}
+
+.job-detail h3 {
+  margin: 22px 0 10px;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.job-detail__meta {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.job-detail__meta > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.job-detail__meta dt {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.job-detail__meta dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-detail__empty {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.run-list,
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+}
+
+.event--succeeded {
+  border-left-color: var(--ok);
+}
+
+.event--failed {
+  border-left-color: var(--err);
+}
+
+.event--started,
+.event--retrying {
+  border-left-color: var(--warn);
+}
+
+.event__type {
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 3.5em;
+}
+
+.event__job {
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.event__message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+
+.event time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

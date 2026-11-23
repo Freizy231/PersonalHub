@@ -116,3 +116,49 @@ export interface ApprovalRequestEvent {
   preview: string
   expires_in: number
 }
+
+/** 作业（M7）。 */
+export interface Job {
+  id: string
+  job_type: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+  attempts: number
+  max_attempts: number
+  last_error: string | null
+  available_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface TaskEventItem {
+  id: string
+  job_id: string
+  run_id: string | null
+  event_type: string
+  message: string
+  created_at: string
+}
+
+export interface TaskRunItem {
+  id: string
+  attempt: number
+  status: string
+  started_at: string
+  finished_at: string | null
+  error_code: string | null
+}
+
+export interface JobDetail extends Job {
+  runs: TaskRunItem[]
+  events: TaskEventItem[]
+}
+
+export interface JobList {
+  items: Job[]
+  total: number
+}
+
+export interface ActivityList {
+  items: TaskEventItem[]
+  total: number
+}

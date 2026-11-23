@@ -9,7 +9,7 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - 环境审计：[`docs/ENVIRONMENT_AUDIT.md`](docs/ENVIRONMENT_AUDIT.md)
 - 里程碑状态：[`docs/ROADMAP.md`](docs/ROADMAP.md)
 
-项目处于 **M6（治理与审批）已完成**：AI 可调用工具，写操作必须经你确认后才执行。已确认技术选型：后端 Python + FastAPI，
+**MVP（M0–M7）全部完成**：可对话、有记忆、能调用工具、写操作需审批、任务在后台可靠执行。已确认技术选型：后端 Python + FastAPI，
 前端 **React + TypeScript + Vite**。
 
 > 历史版本 v0.14.2 与本项目无关联，不作为参考实现，其源码与数据不导入本项目。
@@ -68,6 +68,14 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - `create_task`（写，需审批）/ `list_tasks`（读）
 - 工具被拒绝时，AI 会如实告诉你没执行，不会假装成功
 
+### 已完成（M7）
+
+- **持久化作业队列**：SQLite 表即队列，幂等入队、原子领取、指数退避重试
+- **后台 Worker**：跑在本地服务进程里，关闭浏览器不影响
+- **重启恢复**：服务重启后未完成作业重新排队；执行实例标记为"被中断"而非谎称失败
+- **任务中心**：按状态筛选，支持取消、重试，有进行中任务时自动刷新
+- **活动中心**：全局事件时间线 + 单个任务详情（每次尝试、错误码、时间）
+
 ### 配置
 
 模型需要 API Key，**只在后端设置**，绝不要写进前端：
@@ -124,7 +132,7 @@ cd backend && uv run python scripts/diagnose_model.py
 | M4 | 记忆引擎（候选/审核/检索） | 已完成 |
 | M5 | Agent Loop 与只读工具 | 已完成 |
 | M6 | 治理与审批 | 已完成 |
-| M7 | 持久化任务运行时 | 未开始 |
+| M7 | 持久化任务运行时 | 已完成 |
 
 ## 开发环境要求
 
@@ -167,10 +175,10 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（313 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# 后端测试（361 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
 # workspace 隔离、role 伪造防护、流式对话、取消语义、外发审计、代理处理、
 # 记忆提取/审核/注入隔离/去重、Agent 循环、工具 Broker、参数校验、
-# 审批绑定/过期/一次性消费/越权、Policy 决策）
+# 审批绑定/过期/一次性消费/越权、Policy 决策、作业队列/重试/恢复/Worker）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 

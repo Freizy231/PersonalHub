@@ -9,12 +9,16 @@
  */
 
 import type {
+  ActivityList,
   ApiErrorBody,
+  Approval,
+  ApprovalList,
   Conversation,
   ConversationList,
   HealthResponse,
-  Approval,
-  ApprovalList,
+  Job,
+  JobDetail,
+  JobList,
   MemoryItem,
   MemoryList,
   Message,
@@ -156,6 +160,27 @@ export const api = {
           body: JSON.stringify({ content }),
         }),
     },
+  },
+
+  jobs: {
+    list: (status?: string) => {
+      const params = new URLSearchParams()
+      if (status) params.set('status', status)
+      const qs = params.toString()
+      return request<JobList>(`/jobs${qs ? `?${qs}` : ''}`)
+    },
+
+    get: (id: string) => request<JobDetail>(`/jobs/${encodeURIComponent(id)}`),
+
+    cancel: (id: string) =>
+      request<Job>(`/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+
+    retry: (id: string) =>
+      request<Job>(`/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
+  },
+
+  activity: {
+    list: (limit = 50) => request<ActivityList>(`/activity?limit=${limit}`),
   },
 
   approvals: {
