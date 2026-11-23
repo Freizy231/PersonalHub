@@ -42,12 +42,20 @@ export type Result<T> =
   | { ok: false; message: string; code: string; requestId?: string }
 
 /** 与后端 MessageOut 对应。时间同样为 ISO 8601 + Z。 */
+export interface ToolInvocationSummary {
+  tool: string
+  status: string
+  error_code: string | null
+}
+
 export interface Message {
   id: string
   conversation_id: string
   role: string
   content: string
   created_at: string
+  /** 该回合调用过的工具（仅助手消息可能有值）。 */
+  tools?: ToolInvocationSummary[]
 }
 
 export interface MessageList {

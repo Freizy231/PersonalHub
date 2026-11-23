@@ -42,8 +42,16 @@ async def list_messages(
     _require_conversation(conversations, conversation_id)
 
     items = messages.list_for_conversation(conversation_id, limit=limit, offset=offset)
+    tool_map = messages.tool_invocations_for(conversation_id)
+
     return MessageListOut(
-        items=[MessageOut.model_validate(item) for item in items],
+        items=[
+            MessageOut(
+                **MessageOut.model_validate(item).model_dump(exclude={"tools"}),
+                tools=tool_map.get(item.id, []),
+            )
+            for item in items
+        ],
         total=messages.count_for_conversation(conversation_id),
         limit=limit,
         offset=offset,

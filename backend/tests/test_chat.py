@@ -36,7 +36,7 @@ class FakeProvider:
         self.calls: list[tuple[list[ChatMessage], str]] = []
 
     async def stream_chat(
-        self, messages: list[ChatMessage], model: str
+        self, messages: list[ChatMessage], model: str, tools=None
     ) -> AsyncIterator[StreamChunk]:
         self.calls.append((messages, model))
         if self.error is not None:

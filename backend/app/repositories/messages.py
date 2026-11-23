@@ -37,6 +37,31 @@ class MessageRepository:
         )
         return list(self._session.scalars(stmt))
 
+    def tool_invocations_for(self, conversation_id: str) -> dict[str, list[dict[str, object]]]:
+        """按 message_id 分组返回工具调用记录（§7.4 可理解摘要）。
+
+        只返回元数据，不含参数与结果正文。
+        """
+        from app.models.tool_invocation import ToolInvocation
+
+        stmt = (
+            select(ToolInvocation)
+            .where(ToolInvocation.conversation_id == conversation_id)
+            .order_by(ToolInvocation.created_at.asc())
+        )
+        grouped: dict[str, list[dict[str, object]]] = {}
+        for row in self._session.scalars(stmt):
+            if not row.message_id:
+                continue
+            grouped.setdefault(row.message_id, []).append(
+                {
+                    "tool": row.tool_name,
+                    "status": row.status,
+                    "error_code": row.error_code,
+                }
+            )
+        return grouped
+
     def count_for_conversation(self, conversation_id: str) -> int:
         stmt = (
             select(func.count())

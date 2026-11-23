@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.ai import ChatMessage, ProviderError, StreamChunk
+from app.ai import ChatMessage, ProviderError, StreamChunk, ToolCallDelta, ToolSpec
 
 # 连接超时必须短：本地工具连不上就该快速失败，而不是让界面转圈 30 秒。
 # 读取超时较长：模型生成首包可能慢。整体上限由调用方控制。
@@ -101,13 +101,26 @@ class OpenAICompatibleProvider:
         }
 
     async def stream_chat(
-        self, messages: list[ChatMessage], model: str
+        self, messages: list[ChatMessage], model: str, tools: list[ToolSpec] | None = None
     ) -> AsyncIterator[StreamChunk]:
-        payload = {
+        payload: dict[str, object] = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [_encode_message(m) for m in messages],
             "stream": True,
         }
+        if tools:
+            # 只声明能力，不授予权限；是否真正执行由 Tool Broker 决定。
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
+            ]
         timeout = httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)
 
         # 测试注入 transport 时不能同时设 proxy（httpx 会忽略 transport 转而直连）。
@@ -224,8 +237,94 @@ def _parse_sse_line(line: str) -> StreamChunk | None:
     choices = event.get("choices") or []
     if not choices:
         return None
-    delta = choices[0].get("delta") or {}
-    content = delta.get("content")
-    if not isinstance(content, str) or content == "":
+
+    choice = choices[0]
+    if not isinstance(choice, dict):
         return None
-    return StreamChunk(delta=content)
+
+    delta = choice.get("delta") or {}
+    if not isinstance(delta, dict):
+        return None
+
+    # 工具调用分片与文本 delta 可能出现在同一条事件里，也可能各自单独出现。
+    tool_delta = _parse_tool_call_delta(delta)
+    content = delta.get("content")
+
+    if isinstance(content, str) and content != "":
+        return StreamChunk(delta=content, tool_call_delta=tool_delta)
+
+    if tool_delta is not None:
+        return StreamChunk(tool_call_delta=tool_delta)
+
+    finish = choice.get("finish_reason")
+    if isinstance(finish, str):
+        # 结束原因需要让调用方知道（tool_calls 表示该执行工具了）。
+        return StreamChunk(finish_reason=finish)
+
+    return None
+
+
+def _encode_message(message: ChatMessage) -> dict[str, object]:
+    """把内部消息编码为 OpenAI 协议格式。
+
+    容易出错的细节：
+    - assistant 带工具调用时，content 可以是 None（协议允许），但很多实现
+      不接受空字符串。这里按有无工具调用分别处理。
+    - tool 角色的消息必须带 tool_call_id，否则供应商会拒绝整个请求。
+    """
+    if message.role == "assistant" and message.tool_calls:
+        return {
+            "role": "assistant",
+            "content": message.content or None,
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.name, "arguments": call.arguments},
+                }
+                for call in message.tool_calls
+            ],
+        }
+
+    if message.role == "tool":
+        return {
+            "role": "tool",
+            "tool_call_id": message.tool_call_id,
+            "content": message.content,
+        }
+
+    return {"role": message.role, "content": message.content}
+
+
+def _parse_tool_call_delta(delta: dict) -> ToolCallDelta | None:
+    """解析工具调用分片。
+
+    协议细节（实测容易写错的地方）：
+    - 只有第一片带 id 和 function.name，后续分片只带 arguments 片段。
+    - index 是稳定标识，必须按它归并，不能用出现顺序。
+    - arguments 可能被切成任意长度的字符串（甚至切在多字节字符中间）。
+    """
+    calls = delta.get("tool_calls")
+    if not isinstance(calls, list) or not calls:
+        return None
+
+    first = calls[0]
+    if not isinstance(first, dict):
+        return None
+
+    index = first.get("index")
+    if not isinstance(index, int):
+        index = 0
+
+    function = first.get("function")
+    name = None
+    fragment = ""
+    if isinstance(function, dict):
+        if isinstance(function.get("name"), str):
+            name = function["name"]
+        if isinstance(function.get("arguments"), str):
+            fragment = function["arguments"]
+
+    call_id = first.get("id") if isinstance(first.get("id"), str) else None
+
+    return ToolCallDelta(index=index, id=call_id, name=name, arguments_fragment=fragment)

@@ -3,12 +3,13 @@ import { Link, useParams } from 'react-router-dom'
 
 import { MessageComposer } from '../components/MessageComposer'
 import { MessageList } from '../components/MessageList'
+import { ToolActivityList } from '../components/ToolActivityList'
 import { useConversationDetail } from '../hooks/useConversationDetail'
 
 /** 会话详情：消息列表 + 输入框。 */
 export function ConversationDetailPage() {
   const { conversationId = '' } = useParams()
-  const { state, streamingText, sending, sendError, send, cancel, reload } =
+  const { state, streamingText, toolActivity, sending, sendError, send, cancel, reload } =
     useConversationDetail(conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -53,6 +54,8 @@ export function ConversationDetailPage() {
       <h2 className="detail__title">
         {state.loading && !state.conversation ? '正在加载…' : state.conversation?.title}
       </h2>
+
+      <ToolActivityList activities={toolActivity} />
 
       {state.loading && state.messages.length === 0 ? (
         <p className="messages__empty">正在加载消息…</p>

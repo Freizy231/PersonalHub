@@ -7,6 +7,9 @@
 
 export interface StreamHandlers {
   onDelta: (text: string) => void
+  /** 工具调用的开始与结束。让用户看得见 AI 在做什么（AGENT.md §7.4 可理解摘要）。 */
+  onToolStart?: (payload: { id: string; name: string }) => void
+  onToolEnd?: (payload: { id: string; name: string; status: string; error_code?: string }) => void
   onDone: (payload: { message_id: string }) => void
   onError: (payload: { code: string; message: string }) => void
 }
@@ -92,6 +95,12 @@ export async function streamChat(
         if (frame.event === 'delta') {
           const text = (payload as { text?: unknown }).text
           if (typeof text === 'string') handlers.onDelta(text)
+        } else if (frame.event === 'tool_start') {
+          handlers.onToolStart?.(payload as { id: string; name: string })
+        } else if (frame.event === 'tool_end') {
+          handlers.onToolEnd?.(
+            payload as { id: string; name: string; status: string; error_code?: string },
+          )
         } else if (frame.event === 'done') {
           handlers.onDone(payload as { message_id: string })
         } else if (frame.event === 'error') {

@@ -16,10 +16,20 @@ export interface ConversationDetailState {
   loadError: string | null
 }
 
+/** 一次工具调用在界面上的展示状态。 */
+export interface ToolActivity {
+  id: string
+  name: string
+  status: 'running' | 'ok' | 'denied' | 'error'
+  errorCode?: string
+}
+
 export interface UseConversationDetail {
   state: ConversationDetailState
   /** 流式生成中的文本；null 表示当前没有生成。 */
   streamingText: string | null
+  /** 本轮的工具调用记录，用于向用户展示 AI 做了什么。 */
+  toolActivity: ToolActivity[]
   sending: boolean
   sendError: string | null
   send: (content: string) => Promise<boolean>
@@ -46,6 +56,7 @@ export function useConversationDetail(conversationId: string): UseConversationDe
     loadError: null,
   })
   const [streamingText, setStreamingText] = useState<string | null>(null)
+  const [toolActivity, setToolActivity] = useState<ToolActivity[]>([])
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
 
@@ -109,6 +120,7 @@ export function useConversationDetail(conversationId: string): UseConversationDe
       setSending(true)
       setSendError(null)
       setStreamingText('')
+      setToolActivity([])
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -133,6 +145,33 @@ export function useConversationDetail(conversationId: string): UseConversationDe
           onDelta: (text) => {
             accumulated += text
             if (mounted.current) setStreamingText(accumulated)
+          },
+          onToolStart: (payload) => {
+            if (!mounted.current) return
+            setToolActivity((prev) => [
+              ...prev,
+              { id: payload.id, name: payload.name, status: 'running' },
+            ])
+          },
+          onToolEnd: (payload) => {
+            if (!mounted.current) return
+            const status =
+              payload.status === 'ok'
+                ? 'ok'
+                : payload.status === 'denied'
+                  ? 'denied'
+                  : 'error'
+            setToolActivity((prev) =>
+              prev.map((item) =>
+                item.id === payload.id
+                  ? {
+                      ...item,
+                      status,
+                      ...(payload.error_code ? { errorCode: payload.error_code } : {}),
+                    }
+                  : item,
+              ),
+            )
           },
           onDone: () => {
             // 结束后统一从服务端拉取，替换乐观消息与流式文本。
@@ -166,5 +205,14 @@ export function useConversationDetail(conversationId: string): UseConversationDe
     abortRef.current?.abort()
   }, [])
 
-  return { state, streamingText, sending, sendError, send, cancel, reload: load }
+  return {
+    state,
+    streamingText,
+    toolActivity,
+    sending,
+    sendError,
+    send,
+    cancel,
+    reload: load,
+  }
 }

@@ -6,6 +6,21 @@ interface MessageListProps {
   streamingText: string | null
 }
 
+const TOOL_LABEL: Record<string, string> = {
+  search_memories: '检索记忆',
+}
+
+const TOOL_STATUS: Record<string, string> = {
+  ok: '完成',
+  denied: '已被拒绝',
+  error: '失败',
+}
+
+function toolStatus(status: string): string {
+  if (status === 'ok' || status === 'denied' || status === 'error') return status
+  return 'error'
+}
+
 const ROLE_LABEL: Record<string, string> = {
   user: '你',
   assistant: 'AI',
@@ -42,6 +57,19 @@ export function MessageList({ messages, streamingText }: MessageListProps) {
             </time>
           </div>
           <p className="message__content">{message.content}</p>
+          {message.tools && message.tools.length > 0 && (
+            <ul className="message__tools">
+              {message.tools.map((item, index) => (
+                <li
+                  key={`${item.tool}-${index}`}
+                  className={`message__tool message__tool--${toolStatus(item.status)}`}
+                >
+                  调用工具：{TOOL_LABEL[item.tool] ?? item.tool}
+                  <span className="message__tool-status">{TOOL_STATUS[item.status] ?? item.status}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </li>
       ))}
 

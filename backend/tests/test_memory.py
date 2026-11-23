@@ -44,7 +44,7 @@ class ExtractionProvider:
         self.memories = memories if memories is not None else []
         self.calls: list[list[ChatMessage]] = []
 
-    async def stream_chat(self, messages, model):  # type: ignore[no-untyped-def]
+    async def stream_chat(self, messages, model, tools=None):  # type: ignore[no-untyped-def]
         self.calls.append(list(messages))
         is_extraction = any("记忆提取器" in m.content for m in messages)
         text = _extraction_reply(self.memories) if is_extraction else self.chat_reply
@@ -241,14 +241,14 @@ class TestExtractionFlow:
         client, provider = create
         cid = _conversation(client)
 
-        async def boom(messages, model):  # type: ignore[no-untyped-def]
+        async def boom(messages, model, tools=None):  # type: ignore[no-untyped-def]
             raise RuntimeError("extraction exploded")
             yield  # pragma: no cover
 
         original = provider.stream_chat
         calls = {"n": 0}
 
-        async def flaky(messages, model):  # type: ignore[no-untyped-def]
+        async def flaky(messages, model, tools=None):  # type: ignore[no-untyped-def]
             calls["n"] += 1
             if any("记忆提取器" in m.content for m in messages):
                 async for c in boom(messages, model):  # pragma: no cover

@@ -101,7 +101,29 @@
 - [ ] 敏感级别不参与任何过滤（D-008）
 - [ ] 提取为条数/字符截断，无 token 预算管理
 
-### M5 — Basic Agent & Read-only Tools — 未开始
+### M5 — Basic Agent & Read-only Tools — 已完成
+
+已完成：
+- [x] Tool Registry：显式登记，无自动发现；Spec 不含 handler
+- [x] Tool Broker：注册校验 → Schema 校验 → 风险级别 → 执行 → 输出限长 → 审计
+- [x] 参数校验：非法 JSON / 未知字段 / 类型不符 / 缺必需参数全部拒绝；布尔不当整数
+- [x] 写操作工具（WRITE）在 M5 一律拒绝，handler 绝不执行
+- [x] Agent Loop：多轮工具往返，上限 4 轮；并行工具调用；分片按 index 归并
+- [x] 工具结果以 `trust: untrusted` 回填，声明不得当作指令（间接注入防护）
+- [x] `search_memories`：只返回 APPROVED、只限当前工作空间
+- [x] 工具调用记录入库（`tool_invocations`），刷新页面后仍可回看
+- [x] 前端：流式期间显示工具活动，历史消息显示工具调用摘要
+- [x] 后端 272 项测试
+
+过程中修的真实缺陷：
+- [x] 中文检索漏召：记忆"我在学 TypeScript"查"学习"匹配不到——加停用词过滤与单字兜底
+- [x] Agent 的 done 事件重复携带全文，导致调用方重复拼接
+- [x] 工具记录只存在于 SSE 流中，刷新即丢失——改为入库
+
+M5 未交付（理由）：
+- `list_tasks`：`tasks` 表属于 M7，按"不提前创建未使用表"推迟；
+  Registry/Broker 已可容纳，届时只需注册一个只读工具
+- Policy Engine / Approval Manager：属 M6，届时插入 Broker 第 3 步之后
 
 ### M6 — Governance & Approval — 未开始
 

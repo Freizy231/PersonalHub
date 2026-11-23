@@ -24,9 +24,12 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from app.agent.loop import run_agent_loop
 from app.ai import ChatMessage, ProviderConfigurationError, ProviderError, read_api_key
 from app.ai.openai_compatible import OpenAICompatibleProvider
 from app.api.deps import ConversationRepoDep, MessageRepoDep
+from app.capabilities import ToolContext
+from app.capabilities.broker import ToolBroker
 from app.core.audit import EgressRecord, record_egress
 from app.core.config import Settings
 from app.core.errors import PublicMessageError
@@ -163,6 +166,9 @@ async def stream_chat(
     # 记忆注入与提取都需要数据库会话；与请求级 Session 分开，
     # 因为提取在响应流结束后仍需可用。
     session_factory = request.app.state.session_factory
+    # 工具能力来自应用级注册表；本请求只读取，不修改。
+    registry = request.app.state.tool_registry
+    broker = ToolBroker(registry)
 
     # 供应商未配置时立即返回明确错误，而不是开始一个注定失败的流。
     try:
@@ -205,13 +211,44 @@ async def stream_chat(
         审计里就只剩 "started"，事后无法判断这次外发是否完成。
         """
         collected: list[str] = []
+        # 本轮的工具调用记录，最终随助手消息入库（§7.4 执行摘要）。
+        tool_events: list[dict[str, object]] = []
         outcome = "aborted"
         error_code: str | None = None
 
         try:
-            async for chunk in provider.stream_chat(chat_messages, settings.model):
-                collected.append(chunk.delta)
-                yield _sse("delta", {"text": chunk.delta})
+            # M5：改由 Agent Loop 驱动，模型可在回答过程中发起工具调用。
+            # 所有工具调用都经 Tool Broker，Agent 无法直接触碰数据。
+            async for event in run_agent_loop(
+                provider=provider,
+                model=settings.model,
+                messages=chat_messages,
+                broker=broker,
+                tools=registry.specs_for_model(),
+                context=ToolContext(
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    conversation_id=payload.conversation_id,
+                ),
+            ):
+                if event.kind == "delta":
+                    collected.append(event.text)
+                    yield _sse("delta", {"text": event.text})
+                elif event.kind == "tool_start":
+                    yield _sse("tool_start", event.payload)
+                elif event.kind == "tool_end":
+                    tool_events.append(
+                        {
+                            "name": str(event.payload.get("name", "")),
+                            "status": str(event.payload.get("status", "")),
+                            "error_code": event.payload.get("error_code"),
+                        }
+                    )
+                    yield _sse("tool_end", event.payload)
+                elif event.kind == "error":
+                    outcome, error_code = "failed", str(event.payload.get("code", "ERROR"))
+                    yield _sse("error", event.payload)
+                    return
+                # done 事件不携带全文，文本已通过 delta 累加，无需再处理。
 
             reply = "".join(collected).strip()
             if not reply:
@@ -222,6 +259,9 @@ async def stream_chat(
             # 助手消息入库。role 由服务端写入，前端无法伪造（§8.4）。
             stored = messages.append(payload.conversation_id, reply, role="assistant")
             conversations.touch(conversation)
+            _record_tool_invocations(
+                session_factory, payload.conversation_id, stored.id, tool_events
+            )
             outcome = "completed"
             # 3) 对话成功后，后台提取候选记忆（不阻塞用户，失败也不影响本次对话）。
             _schedule_extraction(
@@ -247,6 +287,38 @@ async def stream_chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def _record_tool_invocations(
+    session_factory,  # type: ignore[no-untyped-def]
+    conversation_id: str,
+    message_id: str,
+    events: list[dict[str, object]],
+) -> None:
+    """把本轮工具调用写入数据库，供用户事后回看。
+
+    只写元数据（工具名/状态/错误码），不写参数与返回值。
+    写失败不影响对话本身——用户已经看到回复了，缺一条审计记录不值得让请求失败。
+    """
+    if not events:
+        return
+    try:
+        from app.models.tool_invocation import ToolInvocation
+
+        with session_factory() as session:
+            for event in events:
+                session.add(
+                    ToolInvocation(
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        tool_name=str(event.get("name", "")),
+                        status=str(event.get("status", "")),
+                        error_code=(str(event["error_code"]) if event.get("error_code") else None),
+                    )
+                )
+            session.commit()
+    except Exception:
+        logger.exception("写入工具调用记录失败", extra={"conversation_id": conversation_id})
 
 
 def _with_outcome(base: EgressRecord, outcome: str, error_code: str | None = None) -> EgressRecord:

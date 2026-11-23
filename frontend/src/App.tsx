@@ -56,7 +56,7 @@ export default function App() {
 
         <footer className="app__footer">
           <p>
-            当前处于 <strong>M4 — 记忆引擎</strong> 阶段。
+            当前处于 <strong>M5 — Agent 与工具</strong> 阶段。
           </p>
           <p>数据默认留在本机，服务只监听回环地址。</p>
         </footer>

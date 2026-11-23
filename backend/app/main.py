@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 
 from app.api import chat, conversations, health, memory, messages
+from app.capabilities import ToolRegistry
+from app.capabilities.tools import register_builtin_tools
 from app.core.config import Settings, get_settings
 from app.core.errors import install_exception_handlers
 from app.core.logging import configure_logging
@@ -73,6 +75,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = build_session_factory(engine)
+
+    # 工具注册表：显式登记 M5 的只读工具。不存在自动发现，
+    # 避免某个模块被导入就悄悄获得能力（AGENT.md §4.9）。
+    tool_registry = ToolRegistry()
+    register_builtin_tools(tool_registry, app.state.session_factory)
+    app.state.tool_registry = tool_registry
 
     app.add_middleware(
         CORSMiddleware,

@@ -40,6 +40,14 @@ class MessageCreate(BaseModel):
     _validate_content = field_validator("content")(_clean_content)
 
 
+class ToolInvocationOut(BaseModel):
+    """工具调用摘要。只含元数据，不含参数与结果正文。"""
+
+    tool: str
+    status: str
+    error_code: str | None = None
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -48,6 +56,8 @@ class MessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime
+    # 该回合调用过的工具；仅助手消息可能有值。
+    tools: list[ToolInvocationOut] = []
 
     @field_validator("created_at", mode="before")
     @classmethod
