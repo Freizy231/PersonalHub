@@ -596,3 +596,62 @@ class TestDeniedResultTellsModelTruth:
 
         assert body["trust"] == "untrusted"
         assert body["source"] == "tool"
+
+
+class TestSchemaDriftDetection:
+    """实测事故：用户库停在 M5，M6 加了 tasks/approvals 但没迁移，
+    对话里调用 list_tasks 直接抛 "no such table: tasks"。
+
+    启动检查必须覆盖全部必需表，不能只查早期里程碑的表。
+    """
+
+    def test_all_milestone_tables_are_required(self) -> None:
+        from app.main import REQUIRED_TABLES
+
+        # 每新增一个里程碑，这张表清单都要同步。这里显式断言，
+        # 让遗漏在测试阶段暴露，而不是在用户那里变成 500。
+        assert "tasks" in REQUIRED_TABLES
+        assert "approvals" in REQUIRED_TABLES
+        assert "tool_invocations" in REQUIRED_TABLES
+        assert "memory_items" in REQUIRED_TABLES
+
+    def test_missing_task_table_detected_at_startup(self, tmp_path) -> None:
+        """库停在 M5 时必须被识别为缺表，而不是静默启动。"""
+
+        from alembic.config import Config
+
+        from app.core.config import Settings
+        from app.main import check_schema
+        from app.storage.database import build_engine
+        from tests.conftest import BACKEND_DIR
+
+        # 只迁移到 M5
+        settings = Settings(data_dir=tmp_path / "drift")
+        db = settings.db_path
+        cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+        cfg.cmd_opts = type("_Opts", (), {"x": [f"db_path={db}"]})()
+
+        from alembic import command
+
+        command.upgrade(cfg, "4d77452808f8")
+
+        engine = build_engine(db)
+        try:
+            missing = check_schema(engine)
+        finally:
+            engine.dispose()
+
+        assert "tasks" in missing
+        assert "approvals" in missing
+
+    def test_scripts_head_matches_latest_migration(self) -> None:
+        """迁移链必须是线性的：dev.sh 依赖"只有一个 head"。"""
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        from tests.conftest import BACKEND_DIR
+
+        cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+        heads = ScriptDirectory.from_config(cfg).get_heads()
+
+        assert len(heads) == 1, f"迁移存在多个 head：{heads}"

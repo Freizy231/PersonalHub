@@ -78,25 +78,56 @@ fi
 # 注意：uv/alembic 必须在 backend 目录下运行 —— 根目录没有 pyproject.toml，
 # 否则会报 "Failed to spawn: alembic / No such file or directory"。
 echo "→ 检查数据库结构…"
-# alembic current 在无版本时只输出警告且退出码为 0，不可靠；
-# 直接看数据库里有没有 conversations 表更准确。
-TABLES="$( cd "$ROOT/backend" && .venv/bin/python -c '
-import sqlite3, sys
+# 用 Alembic 版本与迁移脚本头部比较，而不是硬编码表名清单。
+# 实测教训：早先只检查 conversations/memory_items，M6 新增 tasks/approvals 时
+# 脚本误判"已就绪"，用户启动后才遇到 "no such table: tasks"。
+SCHEMA_STATE="$( cd "$ROOT/backend" && .venv/bin/python -c '
+import sqlite3
+from pathlib import Path
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from app.core.config import get_settings
+
+# 迁移脚本里的最新版本
+cfg = Config("alembic.ini")
+latest = ScriptDirectory.from_config(cfg).get_current_head()
+
+# 数据库里记录的版本
+db = get_settings().db_path
+if not Path(db).exists():
+    print("missing"); raise SystemExit
 try:
-    con = sqlite3.connect(get_settings().db_path)
-    names = {r[0] for r in con.execute("select name from sqlite_master where type=\"table\"")}
-    print("ready" if {"conversations", "memory_items"} <= names else "missing")
+    con = sqlite3.connect(db)
+    rows = con.execute("select version_num from alembic_version").fetchall()
+    current = rows[0][0] if rows else None
 except Exception:
+    current = None
+
+if current is None:
     print("missing")
+elif current != latest:
+    print(f"outdated {current} -> {latest}")
+else:
+    print("ready")
 ' 2>/dev/null || echo "missing" )"
 
-if [ "$TABLES" = "ready" ]; then
-  echo "  表结构已就绪。"
-else
-  echo "  尚未初始化，执行 uv run alembic upgrade head（在 backend 目录下）。"
-  ( cd "$ROOT/backend" && uv run alembic upgrade head )
-fi
+case "$SCHEMA_STATE" in
+  ready)
+    echo "  表结构已是最新。"
+    ;;
+  missing)
+    echo "  尚未初始化，执行 uv run alembic upgrade head（在 backend 目录下）。"
+    ( cd "$ROOT/backend" && uv run alembic upgrade head )
+    ;;
+  outdated*)
+    echo "  数据库版本落后（${SCHEMA_STATE#outdated }），正在升级。"
+    ( cd "$ROOT/backend" && uv run alembic upgrade head )
+    ;;
+  *)
+    echo "  无法判断数据库状态，执行 uv run alembic upgrade head。"
+    ( cd "$ROOT/backend" && uv run alembic upgrade head )
+    ;;
+esac
 
 echo "→ 启动后端 http://$HOST:$BACKEND_PORT"
 start_service backend "$ROOT/backend" \
