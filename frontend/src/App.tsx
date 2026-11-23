@@ -1,28 +1,60 @@
-import { ConversationList } from './components/ConversationList'
-import { StatusCard } from './components/StatusCard'
-import { useHealth } from './hooks/useHealth'
+import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
+
+import { ConversationDetailPage } from './pages/ConversationDetailPage'
+import { ConversationsPage } from './pages/ConversationsPage'
+import { HomePage } from './pages/HomePage'
+
+/** 导航只列出已实现的页面，避免死链接（AGENT.md：不提前创建空模块）。 */
+const NAV_ITEMS = [
+  { to: '/', label: '总览', end: true },
+  { to: '/conversations', label: '会话', end: false },
+]
 
 export default function App() {
-  const { state, recheck } = useHealth()
-  const backendOnline = state.status === 'online'
-
   return (
-    <main className="app">
-      <header className="app__header">
-        <h1 className="app__title">Personal Hub</h1>
-        <p className="app__subtitle">本地优先的个人 AI 环境 · MVP 骨架</p>
-      </header>
+    <BrowserRouter>
+      <main className="app">
+        <header className="app__header">
+          <h1 className="app__title">Personal Hub</h1>
+          <p className="app__subtitle">本地优先的个人 AI 环境 · MVP 骨架</p>
+          <nav className="app__nav" aria-label="主导航">
+            {NAV_ITEMS.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) => (isActive ? 'app__nav-link is-active' : 'app__nav-link')}
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+        </header>
 
-      <StatusCard state={state} onRecheck={recheck} checking={state.status === 'checking'} />
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/conversations" element={<ConversationsPage />} />
+          <Route path="/conversations/:conversationId" element={<ConversationDetailPage />} />
+          <Route
+            path="*"
+            element={
+              <section className="detail">
+                <p className="detail__message">页面不存在。</p>
+                <NavLink className="button" to="/">
+                  返回总览
+                </NavLink>
+              </section>
+            }
+          />
+        </Routes>
 
-      {backendOnline && <ConversationList />}
-
-      <footer className="app__footer">
-        <p>
-          当前处于 <strong>M2 — SQLite 持久化</strong> 阶段。
-        </p>
-        <p>数据默认留在本机，服务只监听回环地址。</p>
-      </footer>
-    </main>
+        <footer className="app__footer">
+          <p>
+            当前处于 <strong>M2 — SQLite 持久化</strong> 阶段。
+          </p>
+          <p>数据默认留在本机，服务只监听回环地址。</p>
+        </footer>
+      </main>
+    </BrowserRouter>
   )
 }

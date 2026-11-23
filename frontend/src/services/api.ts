@@ -13,6 +13,8 @@ import type {
   Conversation,
   ConversationList,
   HealthResponse,
+  Message,
+  MessageList,
   Result,
 } from '../types/api'
 
@@ -123,6 +125,9 @@ export const api = {
         body: JSON.stringify({ title }),
       }),
 
+    get: (id: string) =>
+      request<Conversation>(`/conversations/${encodeURIComponent(id)}`),
+
     rename: (id: string, title: string) =>
       request<Conversation>(`/conversations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
@@ -132,5 +137,20 @@ export const api = {
 
     remove: (id: string) =>
       request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+    messages: {
+      list: (conversationId: string, limit = 200, offset = 0) =>
+        request<MessageList>(
+          `/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}&offset=${offset}`,
+        ),
+
+      // 后端只接受 role="user"，这里也不发送 role，避免前端与后端契约漂移。
+      append: (conversationId: string, content: string) =>
+        request<Message>(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
+          method: 'POST',
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ content }),
+        }),
+    },
   },
 }

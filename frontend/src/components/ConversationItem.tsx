@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 import type { Conversation } from '../types/api'
 
@@ -86,7 +87,9 @@ export function ConversationItem({ conversation, busy, onRename, onDelete }: Con
   return (
     <li className="conversation">
       <div className="conversation__main">
-        <span className="conversation__title">{conversation.title}</span>
+        <Link className="conversation__title" to={`/conversations/${conversation.id}`}>
+          {conversation.title}
+        </Link>
         <time className="conversation__time" dateTime={conversation.updated_at}>
           {formatTime(conversation.updated_at)}
         </time>

@@ -33,23 +33,25 @@
 - [ ] 前端单元测试（M1 验收未强制，但 §9.2 建议在引入交互逻辑时补充）
 - [ ] 后端生产态同源提供前端静态文件（当前为 Vite 开发代理）
 
-### M2 — SQLite Persistence — 进行中
+### M2 — SQLite Persistence — 已完成
 
 已完成：
 - [x] `conversations` 表（UUID 主键、workspace 作用域、复合索引）
 - [x] `messages` 表（外键 `ON DELETE CASCADE`、role 约束）
 - [x] Alembic 首次迁移，在临时副本上验证 upgrade / downgrade 往返
-- [x] CRUD API：列表（分页）、创建、获取、重命名、删除
-- [x] 标题清洗（trim 后拒绝空串）与 Schema `extra="forbid"` 防篡改归属字段
-- [x] 时间统一为 UTC + `Z` 后缀
-- [x] 前端会话管理：新建 / 重命名 / 两段确认删除 / 刷新后恢复
-- [x] 39 项新增后端测试（含级联删除、workspace 隔离、路径注入）
+- [x] 会话 CRUD API：列表（分页）、创建、获取、重命名、删除
+- [x] 消息 API：追加、分页读取；所有请求先校验会话归属
+- [x] 客户端只能创建 `role="user"` 消息，`system` / `assistant` / `tool` 由后端运行时写入
+- [x] 追加消息刷新会话 `updated_at`，列表按最近活动排序
+- [x] 前端路由（react-router）：总览 / 会话列表 / 会话详情
+- [x] 会话详情：消息时间线、Enter 发送 / Shift+Enter 换行、输入法组合保护、多行缩进保留
+- [x] 前端页面刷新、浏览器后退、不存在会话的 404 页面
+- [x] 后端 101 项测试（含 role 伪造、workspace 隔离、级联删除、活动排序）
 
-待完成（下一轮）：
-- [ ] `messages` 的 API（追加、分页读取）
-- [ ] 会话详情页与消息列表 UI
-- [ ] 前端单元测试
-- [ ] 软删除 / 回收站（当前为硬删除，已记为技术债）
+技术债：
+- [ ] 删除为硬删除，无回收站
+- [ ] 前端尚无单元测试
+- [ ] 消息分页为一次性加载 200 条，长对话需要游标分页
 
 ### M3 — AI Workspace — 未开始
 

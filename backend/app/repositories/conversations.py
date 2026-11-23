@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Conversation
+from app.models.base import utc_now
 from app.models.conversation import DEFAULT_WORKSPACE_ID
 
 
@@ -69,6 +70,16 @@ class ConversationRepository:
 
     def rename(self, conversation: Conversation, title: str) -> Conversation:
         conversation.title = title
+        self._session.commit()
+        return conversation
+
+    def touch(self, conversation: Conversation) -> Conversation:
+        """刷新会话的 updated_at。
+
+        用于"追加消息后会话有新活动"的场景。显式赋值而不是依赖 ORM 的
+        onupdate：本操作只改其他表，会话对象本身不会被标记为脏。
+        """
+        conversation.updated_at = utc_now()
         self._session.commit()
         return conversation
 

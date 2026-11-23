@@ -13,6 +13,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.repositories.conversations import ConversationRepository
+from app.repositories.messages import MessageRepository
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -40,4 +41,9 @@ def get_conversation_repository(session: SessionDep) -> ConversationRepository:
     return ConversationRepository(session)
 
 
+def get_message_repository(session: SessionDep) -> MessageRepository:
+    return MessageRepository(session)
+
+
 ConversationRepoDep = Annotated[ConversationRepository, Depends(get_conversation_repository)]
+MessageRepoDep = Annotated[MessageRepository, Depends(get_message_repository)]

@@ -40,3 +40,19 @@ export interface ApiErrorBody {
 export type Result<T> =
   | { ok: true; data: T }
   | { ok: false; message: string; code: string; requestId?: string }
+
+/** 与后端 MessageOut 对应。时间同样为 ISO 8601 + Z。 */
+export interface Message {
+  id: string
+  conversation_id: string
+  role: string
+  content: string
+  created_at: string
+}
+
+export interface MessageList {
+  items: Message[]
+  total: number
+  limit: number
+  offset: number
+}

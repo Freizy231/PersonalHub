@@ -435,3 +435,176 @@ button.danger:hover:not(:disabled) {
     flex-direction: column;
   }
 }
+
+/* ---------- 导航（M2 详情页） ---------- */
+
+.app__nav {
+  display: flex;
+  gap: 4px;
+  margin-top: 18px;
+}
+
+.app__nav-link {
+  padding: 6px 14px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.app__nav-link:hover {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.app__nav-link.is-active {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+  font-weight: 500;
+}
+
+a.button {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+a.button:hover {
+  border-color: var(--accent);
+}
+
+/* ---------- 会话详情 ---------- */
+
+.detail {
+  margin-top: 28px;
+}
+
+.detail__nav a {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.detail__nav a:hover {
+  color: var(--accent);
+}
+
+.detail__title {
+  margin: 10px 0 18px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.detail__message {
+  color: var(--text-muted);
+}
+
+.messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.messages__empty {
+  margin: 20px 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.message {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.message--user {
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.message--system,
+.message--tool {
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--border));
+  font-size: 0.9rem;
+}
+
+.message__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.message__role {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.message__time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.message__content {
+  margin: 0;
+  /* 保留用户输入的换行与缩进（可能是代码） */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.94rem;
+}
+
+/* ---------- 输入框 ---------- */
+
+.composer {
+  margin-top: 18px;
+}
+
+.composer textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.94rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  resize: vertical;
+}
+
+.composer textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.composer__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.composer__hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

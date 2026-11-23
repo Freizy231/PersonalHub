@@ -4,7 +4,7 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 
 ## 当前状态
 
-项目处于 **M2 — SQLite Persistence**（会话持久化已完成）。已确认技术选型：后端 Python + FastAPI，
+项目处于 **M3 前的过渡点**：M2（SQLite 持久化）已完成，会话与消息可持久化读写。已确认技术选型：后端 Python + FastAPI，
 前端 **React + TypeScript + Vite**。
 
 > 历史版本 v0.14.2 与本项目无关联，不作为参考实现，其源码与数据不导入本项目。
@@ -25,6 +25,9 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - 会话 CRUD API：`GET/POST /api/v1/conversations`、`GET/PATCH/DELETE /api/v1/conversations/{id}`
 - 消息随会话级联删除，外键约束真实生效
 - 前端会话管理面板：新建、重命名、两段确认删除，刷新后数据从数据库恢复
+- 消息 API：`GET/POST /api/v1/conversations/{id}/messages`，客户端只能创建 `role="user"`
+- 前端路由：总览 / 会话列表 / 会话详情；支持刷新、后退与不存在会话的友好提示
+- 会话详情支持 Enter 发送、Shift+Enter 换行、多行缩进保留、中文输入法组合保护
 - 数据库位于 `~/.local/share/personal-hub/db/`，不在源码仓库内
 
 数据库操作与迁移流程见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)。
@@ -40,7 +43,7 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 |---|---|---|
 | M0 | 仓库与环境审计 | 已完成 |
 | M1 | 前后端骨架 + 健康检查 | 已完成 |
-| M2 | SQLite 持久化 | 进行中 |
+| M2 | SQLite 持久化 | 已完成 |
 | M3 | AI Workspace（接入模型） | 未开始 |
 | M4 | 记忆引擎基础 | 未开始 |
 | M5 | Agent Loop 与只读工具 | 未开始 |
@@ -88,7 +91,8 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（78 项：健康检查、错误结构、CORS、配置、日志脱敏、会话 CRUD、迁移）
+# 后端测试（101 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# workspace 隔离、role 伪造防护、级联删除、迁移副作用）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 
