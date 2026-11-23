@@ -14,6 +14,10 @@
 
 代码中**没有** `create_all()`。表结构唯一来源是 `backend/alembic/versions/`。
 
+**所有 alembic / uv 命令都必须在 `backend/` 目录下执行。** 仓库根目录不是 uv 项目，
+在根目录运行会得到 `Failed to spawn: alembic`（含义是"当前目录不是 uv 项目"，
+而不是"alembic 未安装"）。
+
 ```bash
 cd backend
 

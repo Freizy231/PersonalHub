@@ -169,6 +169,13 @@ curl -fsS http://127.0.0.1:8000/api/v1/health
 cd backend && uv run alembic upgrade head
 ```
 
+> **必须在 `backend/` 目录下执行。** 仓库根目录没有 `pyproject.toml`，
+> 在根目录运行 `uv run alembic` 会报
+> `Failed to spawn: alembic / No such file or directory` —— 这个报错的意思是
+> "当前目录不是 uv 项目"，不是"没安装 alembic"。
+>
+> 用 `./scripts/dev.sh` 启动时会自动检查并补齐迁移，不必手动执行。
+
 接口文档（仅回环地址可达）：<http://127.0.0.1:8000/api/v1/docs>
 
 ## 数据与隐私

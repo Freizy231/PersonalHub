@@ -73,6 +73,31 @@ if [ ! -d "$ROOT/frontend/node_modules" ]; then
   ( cd "$ROOT/frontend" && npm ci )
 fi
 
+# 数据库结构必须由 Alembic 迁移建立。缺少时直接在这里补齐，
+# 避免用户启动后才遇到"数据库还没有初始化表结构"。
+# 注意：uv/alembic 必须在 backend 目录下运行 —— 根目录没有 pyproject.toml，
+# 否则会报 "Failed to spawn: alembic / No such file or directory"。
+echo "→ 检查数据库结构…"
+# alembic current 在无版本时只输出警告且退出码为 0，不可靠；
+# 直接看数据库里有没有 conversations 表更准确。
+TABLES="$( cd "$ROOT/backend" && .venv/bin/python -c '
+import sqlite3, sys
+from app.core.config import get_settings
+try:
+    con = sqlite3.connect(get_settings().db_path)
+    names = {r[0] for r in con.execute("select name from sqlite_master where type=\"table\"")}
+    print("ready" if {"conversations", "memory_items"} <= names else "missing")
+except Exception:
+    print("missing")
+' 2>/dev/null || echo "missing" )"
+
+if [ "$TABLES" = "ready" ]; then
+  echo "  表结构已就绪。"
+else
+  echo "  尚未初始化，执行 uv run alembic upgrade head（在 backend 目录下）。"
+  ( cd "$ROOT/backend" && uv run alembic upgrade head )
+fi
+
 echo "→ 启动后端 http://$HOST:$BACKEND_PORT"
 start_service backend "$ROOT/backend" \
   .venv/bin/uvicorn app.main:create_app --factory --host "$HOST" --port "$BACKEND_PORT" --reload
