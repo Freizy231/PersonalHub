@@ -50,6 +50,15 @@ export PH_PROVIDER_BASE_URL="https://api.deepseek.com"
 ```
 
 未设置 Key 时，对话接口返回明确的配置错误，其余功能正常。
+
+### 模型连不上时
+
+```bash
+cd backend && uv run python scripts/diagnose_model.py
+```
+
+它会检查密钥格式（空白、引号、`Bearer` 前缀、`sk-` 前缀）并发送一个最小测试请求。
+**只显示密钥首尾各 4 位，不会打印完整密钥。**
 与规范的偏离（未做外发检查层、未用 Keychain）见 [`docs/DECISIONS.md`](docs/DECISIONS.md)。
 
 数据库操作与迁移流程见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)。
