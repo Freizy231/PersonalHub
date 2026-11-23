@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 
-from app.api import chat, conversations, health, memory, messages
+from app.api import approvals, chat, conversations, health, memory, messages
 from app.capabilities import ToolRegistry
 from app.capabilities.tools import register_builtin_tools
 from app.core.config import Settings, get_settings
@@ -27,7 +27,17 @@ from app.storage.database import build_engine, build_session_factory
 logger = logging.getLogger(__name__)
 
 # 启动时必须存在的表。缺失说明数据库没跑过 Alembic 迁移。
-REQUIRED_TABLES = frozenset({"conversations", "messages", "memory_items", "memory_sources"})
+REQUIRED_TABLES = frozenset(
+    {
+        "conversations",
+        "messages",
+        "memory_items",
+        "memory_sources",
+        "tool_invocations",
+        "tasks",
+        "approvals",
+    }
+)
 
 
 def check_schema(engine) -> list[str]:  # type: ignore[no-untyped-def]
@@ -82,6 +92,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_builtin_tools(tool_registry, app.state.session_factory)
     app.state.tool_registry = tool_registry
 
+    # 会话级授权（"本次会话内不再询问"）。刻意放在内存：
+    # 刷新页面/重启服务即失效，避免一次勾选变成永久放行（D-010）。
+    from app.policy.grants import SessionGrants
+
+    app.state.session_grants = SessionGrants()
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
@@ -99,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(conversations.router, prefix=settings.api_prefix)
     app.include_router(messages.router, prefix=settings.api_prefix)
     app.include_router(memory.router, prefix=settings.api_prefix)
+    app.include_router(approvals.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app

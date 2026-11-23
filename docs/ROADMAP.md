@@ -125,7 +125,30 @@ M5 未交付（理由）：
   Registry/Broker 已可容纳，届时只需注册一个只读工具
 - Policy Engine / Approval Manager：属 M6，届时插入 Broker 第 3 步之后
 
-### M6 — Governance & Approval — 未开始
+### M6 — Governance & Approval — 已完成
+
+已完成：
+- [x] Policy Engine（PDP）：三态决策（ALLOW/DENY/REQUIRE_APPROVAL），默认拒绝
+- [x] 授权维度：Principal、Action、Workspace、Expiry；会话级授权按工具隔离
+- [x] Approval Manager：参数指纹绑定、过期、**一次性消费**
+- [x] 执行前重新计算指纹，不符即作废（批准 A 不能执行 B）
+- [x] Broker 内部完成票据校验，resolver 返回 True 也不足以执行（安全回归测试）
+- [x] 最小 `tasks` 表 + `create_task`（WRITE，需审批）/ `list_tasks`（READ）
+- [x] 审批 API：列表、详情、决定
+- [x] 前端：对话内审批卡片、参数摘要、"本次会话内不再询问"（刷新失效）
+- [x] 工具被拒绝时明确指示模型不得声称成功
+- [x] 后端 313 项测试
+
+过程中修复的真实缺陷：
+- [x] 中断时的半成品：票据校验被推到 resolver，等于没有校验（重构收回 Broker）
+- [x] 模型面对"被拒绝"含糊带过，甚至可能让用户以为成功——加 instruction 字段
+
+规范偏离：无。M6 全部按 §4.11 / §8.1 / §8.2 实现。
+
+技术债：
+- [ ] 审批等待基于 asyncio.Event，仅单进程有效（多 Worker 需改）
+- [ ] 服务重启会丢失等待中的对话
+- [ ] 无审批历史的可视化审计页（Activity Center 属 M7）
 
 ### M7 — Persistent Task Runtime — 未开始
 

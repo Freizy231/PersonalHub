@@ -98,28 +98,36 @@ class TestBroker:
             registry.register(tool)
         return ToolBroker(registry)
 
-    def test_executes_registered_tool(self) -> None:
-        result = self._broker(_shell_tool()).execute("echo", '{"text":"hi"}', CTX)
+    @pytest.mark.asyncio
+    async def test_executes_registered_tool(self) -> None:
+        result = await self._broker(_shell_tool()).execute("echo", '{"text":"hi"}', CTX)
 
         assert result.ok
         assert json.loads(result.content) == {"echo": "hi"}
 
-    def test_unknown_tool_denied(self) -> None:
-        result = self._broker().execute("rm_rf", "{}", CTX)
+    @pytest.mark.asyncio
+    async def test_unknown_tool_denied(self) -> None:
+        result = await self._broker().execute("rm_rf", "{}", CTX)
 
         assert result.status == "denied"
         assert result.error_code == "TOOL_NOT_FOUND"
 
-    def test_write_tool_denied_in_m5(self) -> None:
-        """写操作必须等 M6 审批机制；当前一律拒绝。"""
+    @pytest.mark.asyncio
+    async def test_write_tool_denied_without_approval_channel(self) -> None:
+        """没有审批通道时绝不执行写操作（默认拒绝，§8.1）。
+
+        M6 起写操作改为"需要审批"，但 Broker 未配置 resolver/session 时
+        必须拒绝，而不是"没有通道所以放行"。
+        """
         write_tool = _shell_tool(name="danger", risk=RiskLevel.WRITE)
 
-        result = self._broker(write_tool).execute("danger", '{"text":"x"}', CTX)
+        result = await self._broker(write_tool).execute("danger", '{"text":"x"}', CTX)
 
         assert result.status == "denied"
-        assert result.error_code == "WRITE_NOT_ALLOWED"
+        assert result.error_code == "APPROVAL_UNAVAILABLE"
 
-    def test_write_tool_handler_never_called(self) -> None:
+    @pytest.mark.asyncio
+    async def test_write_tool_handler_never_called(self) -> None:
         called: list[str] = []
 
         def handler(args, ctx):  # type: ignore[no-untyped-def]
@@ -127,40 +135,44 @@ class TestBroker:
             return {}
 
         write_tool = _shell_tool(name="danger", risk=RiskLevel.WRITE, handler=handler)
-        self._broker(write_tool).execute("danger", "{}", CTX)
+        await self._broker(write_tool).execute("danger", "{}", CTX)
 
         assert called == [], "被拒绝的写操作绝不能执行 handler"
 
-    def test_invalid_arguments_returns_error_not_raise(self) -> None:
-        result = self._broker(_shell_tool()).execute("echo", "{bad json", CTX)
+    @pytest.mark.asyncio
+    async def test_invalid_arguments_returns_error_not_raise(self) -> None:
+        result = await self._broker(_shell_tool()).execute("echo", "{bad json", CTX)
 
         assert result.status == "error"
         assert result.error_code == "INVALID_ARGUMENTS"
 
-    def test_handler_exception_is_contained(self) -> None:
+    @pytest.mark.asyncio
+    async def test_handler_exception_is_contained(self) -> None:
         def boom(args, ctx):  # type: ignore[no-untyped-def]
             raise RuntimeError("内部数据库路径 /home/user/secret.db")
 
-        result = self._broker(_shell_tool(handler=boom)).execute("echo", '{"text":"x"}', CTX)
+        result = await self._broker(_shell_tool(handler=boom)).execute("echo", '{"text":"x"}', CTX)
 
         assert result.status == "error"
         assert result.error_code == "TOOL_CRASHED"
         # 内部细节不得泄漏给模型
         assert "secret.db" not in result.content
 
-    def test_tool_execution_error_message_passes_through(self) -> None:
+    @pytest.mark.asyncio
+    async def test_tool_execution_error_message_passes_through(self) -> None:
         def fail(args, ctx):  # type: ignore[no-untyped-def]
             raise ToolExecutionError("没有找到匹配的记忆。")
 
-        result = self._broker(_shell_tool(handler=fail)).execute("echo", '{"text":"x"}', CTX)
+        result = await self._broker(_shell_tool(handler=fail)).execute("echo", '{"text":"x"}', CTX)
 
         assert result.error_code == "TOOL_ERROR"
         assert "没有找到匹配的记忆" in result.content
 
-    def test_large_output_is_truncated_but_valid_json(self) -> None:
+    @pytest.mark.asyncio
+    async def test_large_output_is_truncated_but_valid_json(self) -> None:
         big = "x" * (MAX_RESULT_CHARS * 2)
 
-        result = self._broker(_shell_tool(handler=lambda a, c: {"data": big})).execute(
+        result = await self._broker(_shell_tool(handler=lambda a, c: {"data": big})).execute(
             "echo", '{"text":"x"}', CTX
         )
 
@@ -168,8 +180,9 @@ class TestBroker:
         assert parsed["truncated"] is True
         assert len(result.content) < MAX_RESULT_CHARS * 2
 
-    def test_unserializable_output_does_not_crash(self) -> None:
-        result = self._broker(_shell_tool(handler=lambda a, c: object())).execute(
+    @pytest.mark.asyncio
+    async def test_unserializable_output_does_not_crash(self) -> None:
+        result = await self._broker(_shell_tool(handler=lambda a, c: object())).execute(
             "echo", '{"text":"x"}', CTX
         )
 

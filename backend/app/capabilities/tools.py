@@ -15,7 +15,13 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.capabilities import RiskLevel, ToolContext, ToolDefinition, ToolRegistry
+from app.capabilities import (
+    RiskLevel,
+    ToolContext,
+    ToolDefinition,
+    ToolExecutionError,
+    ToolRegistry,
+)
 from app.models.memory import MemoryItem, MemoryStatus
 
 
@@ -186,10 +192,106 @@ def _extract_terms(needle: str) -> list[str]:
     return unique
 
 
-def register_builtin_tools(registry: ToolRegistry, session_factory) -> None:  # type: ignore[no-untyped-def]
-    """注册 M5 可用的全部工具。
+def build_create_task(session_factory) -> ToolDefinition:  # type: ignore[no-untyped-def]
+    """创建任务。**写操作**：必须经用户审批（§2.4）。
 
-    只注册只读工具。新增工具必须在此显式登记，
-    不存在"自动发现"——避免某个模块被导入就悄悄获得能力。
+    审批在 Tool Broker 层完成；这里只负责真正落库，
+    并记录来源审批 id 以便追溯（§5.2 任务状态变更必须可追踪）。
+    """
+    from app.models.task import MAX_TASK_TITLE, Task, TaskStatus
+
+    schema: dict[str, object] = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "任务标题，简短明确"},
+            "description": {"type": "string", "description": "补充说明，可留空"},
+        },
+        "required": ["title"],
+    }
+
+    def handler(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        title = str(arguments.get("title", "")).strip()
+        if not title:
+            raise ToolExecutionError("任务标题不能为空。")
+        if len(title) > MAX_TASK_TITLE:
+            raise ToolExecutionError(f"标题不能超过 {MAX_TASK_TITLE} 个字符。")
+        description = str(arguments.get("description", "")).strip()
+
+        with session_factory() as session:
+            task = Task(
+                title=title,
+                description=description,
+                status=TaskStatus.OPEN.value,
+                workspace_id=context.workspace_id,
+            )
+            session.add(task)
+            session.commit()
+            return {"id": task.id, "title": task.title, "status": task.status}
+
+    return ToolDefinition(
+        name="create_task",
+        description="为用户创建一条任务。需要用户确认后才会真正创建。",
+        parameters=schema,
+        risk=RiskLevel.WRITE,
+        handler=handler,
+    )
+
+
+def build_list_tasks(session_factory) -> ToolDefinition:  # type: ignore[no-untyped-def]
+    """列出任务。只读，直接执行。"""
+    from sqlalchemy import select
+
+    from app.models.task import Task
+
+    schema: dict[str, object] = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "description": "OPEN 或 DONE；留空表示全部"},
+            "limit": {"type": "integer", "description": "最多返回条数，1-50"},
+        },
+        "required": [],
+    }
+
+    def handler(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        raw_status = arguments.get("status", "")
+        raw_limit = arguments.get("limit", 20)
+        limit = raw_limit if isinstance(raw_limit, int) and not isinstance(raw_limit, bool) else 20
+        limit = max(1, min(50, limit))
+
+        with session_factory() as session:
+            stmt = select(Task).where(Task.workspace_id == context.workspace_id)
+            if isinstance(raw_status, str) and raw_status.strip():
+                stmt = stmt.where(Task.status == raw_status.strip().upper())
+            tasks = list(session.scalars(stmt.order_by(Task.created_at.desc()).limit(limit)))
+
+        return {
+            "count": len(tasks),
+            "tasks": [
+                {
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "created_at": task.created_at.isoformat(),
+                }
+                for task in tasks
+            ],
+        }
+
+    return ToolDefinition(
+        name="list_tasks",
+        description="查询用户的任务列表。",
+        parameters=schema,
+        risk=RiskLevel.READ,
+        handler=handler,
+    )
+
+
+def register_builtin_tools(registry: ToolRegistry, session_factory) -> None:  # type: ignore[no-untyped-def]
+    """注册全部内建工具。
+
+    只读工具直接可用；写操作通过 risk=WRITE 声明，
+    由 Tool Broker + Policy Engine 强制审批，工具本身不负责授权。
     """
     registry.register(build_search_memories(session_factory))
+    registry.register(build_list_tasks(session_factory))
+    registry.register(build_create_task(session_factory))

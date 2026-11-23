@@ -91,3 +91,28 @@ export interface MemoryList {
   offset: number
   pending_count: number
 }
+
+/** 审批记录（M6）。 */
+export interface Approval {
+  id: string
+  tool_name: string
+  arguments_preview: string
+  status: 'PENDING' | 'APPROVED' | 'DENIED' | 'EXPIRED'
+  conversation_id: string | null
+  expires_at: string
+  decided_at: string | null
+  consumed: number
+}
+
+export interface ApprovalList {
+  items: Approval[]
+  total: number
+}
+
+/** 对话中出现的审批请求（来自 SSE approval_required 事件）。 */
+export interface ApprovalRequestEvent {
+  approval_id: string
+  tool: string
+  preview: string
+  expires_in: number
+}

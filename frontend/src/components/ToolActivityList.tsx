@@ -2,6 +2,8 @@ import type { ToolActivity } from '../hooks/useConversationDetail'
 
 const TOOL_LABEL: Record<string, string> = {
   search_memories: '检索记忆',
+  list_tasks: '查看任务',
+  create_task: '创建任务',
 }
 
 const STATUS_LABEL: Record<ToolActivity['status'], string> = {

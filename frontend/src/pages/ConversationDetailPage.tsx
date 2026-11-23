@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
+import { ApprovalCard } from '../components/ApprovalCard'
 import { MessageComposer } from '../components/MessageComposer'
 import { MessageList } from '../components/MessageList'
 import { ToolActivityList } from '../components/ToolActivityList'
@@ -9,8 +10,19 @@ import { useConversationDetail } from '../hooks/useConversationDetail'
 /** 会话详情：消息列表 + 输入框。 */
 export function ConversationDetailPage() {
   const { conversationId = '' } = useParams()
-  const { state, streamingText, toolActivity, sending, sendError, send, cancel, reload } =
-    useConversationDetail(conversationId)
+  const {
+    state,
+    streamingText,
+    toolActivity,
+    pendingApproval,
+    decideApproval,
+    deciding,
+    sending,
+    sendError,
+    send,
+    cancel,
+    reload,
+  } = useConversationDetail(conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // 新消息或流式文本增长时滚到底部，否则用户看不到最新内容。
@@ -56,6 +68,14 @@ export function ConversationDetailPage() {
       </h2>
 
       <ToolActivityList activities={toolActivity} />
+
+      {pendingApproval && (
+        <ApprovalCard
+          request={pendingApproval}
+          busy={deciding}
+          onDecide={(decision, remember) => void decideApproval(decision, remember)}
+        />
+      )}
 
       {state.loading && state.messages.length === 0 ? (
         <p className="messages__empty">正在加载消息…</p>

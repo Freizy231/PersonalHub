@@ -131,12 +131,13 @@ class TestLimits:
 
 
 class TestThroughBroker:
-    def test_broker_wraps_output_as_valid_json(self, session, tool) -> None:
+    @pytest.mark.asyncio
+    async def test_broker_wraps_output_as_valid_json(self, session, tool) -> None:
         _seed(session, "经 Broker 调用")
         registry = ToolRegistry()
         registry.register(tool)
 
-        result = ToolBroker(registry).execute("search_memories", '{"query": ""}', CTX)
+        result = await ToolBroker(registry).execute("search_memories", '{"query": ""}', CTX)
 
         assert result.ok
         assert json.loads(result.content)["count"] == 1
@@ -148,18 +149,25 @@ class TestThroughBroker:
 
         specs = registry.specs_for_model()
 
-        assert [s.name for s in specs] == ["search_memories"]
-        assert specs[0].parameters["type"] == "object"
+        names = [s.name for s in specs]
+        assert "search_memories" in names
+        assert "create_task" in names
+        assert "list_tasks" in names
+        assert all(s.parameters["type"] == "object" for s in specs)
 
-    def test_only_readonly_tools_registered(self, session) -> None:
-        """M5 不允许任何写操作工具进入注册表（§2.4、§4.10）。"""
+    def test_write_tools_are_marked_write(self, session) -> None:
+        """M6 起允许写工具进入注册表，但必须正确标记 WRITE，
+        否则 Policy Engine 不会要求审批（这是安全相关的断言）。"""
         from app.capabilities import RiskLevel
 
         factory = pytest.importorskip("sqlalchemy.orm").sessionmaker(bind=session.get_bind())
         registry = ToolRegistry()
         register_builtin_tools(registry, factory)
 
-        assert all(t.risk is RiskLevel.READ for t in registry.all())
+        by_name = {t.name: t for t in registry.all()}
+        assert by_name["search_memories"].risk is RiskLevel.READ
+        assert by_name["list_tasks"].risk is RiskLevel.READ
+        assert by_name["create_task"].risk is RiskLevel.WRITE
 
 
 class TestChineseMatching:

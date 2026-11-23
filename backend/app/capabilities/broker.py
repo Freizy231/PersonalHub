@@ -3,15 +3,16 @@
 模型与实际工具之间的**唯一**受控入口。所有调用都必须经过这里，
 不允许 Agent 直接调用 Handler。
 
-M5 实现的检查链（§4.10 步骤 1–3、8–9）：
+M6 完整检查链（§4.10 步骤 1–10）：
     1. 工具是否已注册
     2. 调用参数 Schema 校验（不可信输入）
-    3. 风险级别：M5 只放行 READ；WRITE 一律拒绝（等 M6 审批机制）
-    4. 执行
-    5. 输出大小与类型校验
-    6. 审计记录
+    3. Policy Engine 决策（默认拒绝）
+    4. REQUIRE_APPROVAL -> 暂停，等待用户决定
+    5. 凭审批票据执行（参数指纹必须一*致）
+    6. 输出大小与类型校验
+    7. 审计记录
 
-Policy Engine 与 Approval Manager 属于 M6；届时在第 3 步与执行之间插入。
+为什么是 async：审批需要"暂停 → 等用户 → 继续"，同步函数无法表达等待。
 """
 
 from __future__ import annotations
@@ -19,16 +20,18 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from app.capabilities import (
-    RiskLevel,
     ToolContext,
+    ToolDefinition,
     ToolExecutionError,
     ToolRegistry,
     validate_arguments,
 )
+from app.policy import Decision, PolicyRequest, evaluate
 
 logger = logging.getLogger(__name__)
 
@@ -43,76 +46,209 @@ class ToolResult:
 
     tool_call_id: str
     name: str
-    status: str  # ok / error / denied
+    status: str  # ok / error / denied / pending_approval
     content: str
     error_code: str | None = None
+    approval_id: str | None = None
 
     @property
     def ok(self) -> bool:
         return self.status == "ok"
 
 
-class ToolBroker:
-    def __init__(self, registry: ToolRegistry) -> None:
-        self._registry = registry
+@dataclass(frozen=True, slots=True)
+class ApprovalRequest:
+    """需要用户确认时，交给调用方的信息（用于 SSE 展示）。"""
 
-    def execute(self, name: str, raw_arguments: str, context: ToolContext) -> ToolResult:
+    approval_id: str
+    tool_name: str
+    preview: str
+    expires_in_seconds: int
+
+
+# 调用方提供：给定审批信息，等待用户决定，返回是否批准。
+# 由 API 层实现（阻塞式交互）：发 SSE、等待 HTTP 决策、超时处理。
+#
+# 注意：这个 resolver **只负责等用户**，不负责校验票据。
+# 票据校验（指纹/过期/一次性消费）留在 Broker 内，见 _execute_with_approval。
+# 否则任何 resolver 只要返回 True 就能执行写操作，审批机制会被架空。
+ApprovalResolver = Callable[[ApprovalRequest], Awaitable[bool]]
+
+
+class ToolBroker:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        *,
+        session_factory=None,  # type: ignore[no-untyped-def]
+        approval_resolver: ApprovalResolver | None = None,
+        session_grants: frozenset[str] = frozenset(),
+    ) -> None:
+        self._registry = registry
+        self._session_factory = session_factory
+        self._approval_resolver = approval_resolver
+        self._session_grants = session_grants
+
+    async def execute(
+        self,
+        name: str,
+        raw_arguments: str,
+        context: ToolContext,
+        *,
+        call_id: str = "",
+        principal_id: str = "local-user",
+    ) -> ToolResult:
         """执行一次工具调用。**任何**失败都返回结构化结果，不向模型抛异常。
 
         为什么不抛异常：模型需要看到"这个调用失败了以及为什么"，
         才能决定换个参数重试或改用别的回答方式。
         """
-        tool_call_id = ""  # 由调用方在包装时填入
-
         definition = self._registry.get(name)
         if definition is None:
-            return self._denied(name, tool_call_id, "TOOL_NOT_FOUND", f"没有名为 {name} 的工具。")
-
-        if definition.risk is RiskLevel.WRITE:
-            # M5 绝不执行写操作：审批机制尚未就绪（§2.4、§4.10 第 5 步）。
-            logger.warning("拒绝执行写操作工具", extra={"tool": name})
-            return self._denied(
-                name,
-                tool_call_id,
-                "WRITE_NOT_ALLOWED",
-                "写操作需要用户审批，当前版本尚不支持。",
+            return self._result(
+                name, call_id, "denied", "TOOL_NOT_FOUND", f"没有名为 {name} 的工具。"
             )
 
         try:
             arguments = validate_arguments(definition.parameters, raw_arguments)
         except ToolExecutionError as exc:
-            return self._error(name, tool_call_id, "INVALID_ARGUMENTS", str(exc))
+            return self._result(name, call_id, "error", "INVALID_ARGUMENTS", str(exc))
 
+        # Policy 决策在参数校验之后：未通过校验的请求不值得打扰用户审批。
+        decision = evaluate(
+            PolicyRequest(
+                principal_id=principal_id,
+                workspace_id=context.workspace_id,
+                tool=definition,
+                arguments=arguments,
+                session_grants=self._session_grants,
+            )
+        )
+
+        if decision.decision is Decision.DENY:
+            logger.warning("策略拒绝工具调用", extra={"tool": name, "reason": decision.reason})
+            return self._result(name, call_id, "denied", "POLICY_DENIED", decision.reason)
+
+        if decision.decision is Decision.REQUIRE_APPROVAL:
+            if self._approval_resolver is None or self._session_factory is None:
+                # 没有审批通道时绝不能"因为没有通道所以放行"（默认拒绝）。
+                return self._result(
+                    name,
+                    call_id,
+                    "denied",
+                    "APPROVAL_UNAVAILABLE",
+                    "该操作需要用户确认，但当前没有可用的确认通道。",
+                )
+            return await self._execute_with_approval(
+                definition, name, call_id, arguments, context, principal_id
+            )
+
+        return self._run(definition, name, call_id, arguments, context)
+
+    async def _execute_with_approval(
+        self,
+        definition: ToolDefinition,
+        name: str,
+        call_id: str,
+        arguments: dict[str, Any],
+        context: ToolContext,
+        principal_id: str,
+    ) -> ToolResult:
+        """创建审批 -> 等用户 -> **在 Broker 内校验并消费票据** -> 执行。
+
+        票据校验必须在这里完成（而不是交给 resolver），
+        否则审批的绑定语义（工具 + 参数指纹 + 主体 + 工作空间 + 过期 + 一次性）
+        会被调用方绕过。
+        """
+        from app.policy.approval import (
+            DEFAULT_TTL,
+            ApprovalError,
+            consume_ticket,
+            create_pending,
+        )
+
+        assert self._approval_resolver is not None
+        assert self._session_factory is not None
+
+        with self._session_factory() as session:
+            approval = create_pending(
+                session,
+                tool_name=name,
+                arguments=arguments,
+                principal_id=principal_id,
+                workspace_id=context.workspace_id,
+                conversation_id=context.conversation_id,
+            )
+            approval_id = approval.id
+            preview = approval.arguments_preview
+
+        approved = await self._approval_resolver(
+            ApprovalRequest(
+                approval_id=approval_id,
+                tool_name=name,
+                preview=preview,
+                expires_in_seconds=int(DEFAULT_TTL.total_seconds()),
+            )
+        )
+
+        if not approved:
+            logger.info("用户拒绝工具调用", extra={"tool": name, "approval_id": approval_id})
+            return self._result(name, call_id, "denied", "APPROVAL_DENIED", "用户拒绝了这个操作。")
+
+        # 关键：无论 resolver 返回什么，都必须再校验一次票据。
+        # 这样即便 resolver 被误实现或状态在等待期间被并发改写，也不会有漏洞。
+        with self._session_factory() as session:
+            try:
+                consume_ticket(
+                    session,
+                    approval_id,
+                    tool_name=name,
+                    arguments=arguments,
+                    principal_id=principal_id,
+                    workspace_id=context.workspace_id,
+                )
+            except ApprovalError as exc:
+                logger.warning(
+                    "审批票据校验失败",
+                    extra={"tool": name, "approval_id": approval_id, "code": exc.code},
+                )
+                return self._result(name, call_id, "denied", exc.code, str(exc))
+
+        return self._run(definition, name, call_id, arguments, context)
+
+    def _run(
+        self,
+        definition: ToolDefinition,
+        name: str,
+        call_id: str,
+        arguments: dict[str, Any],
+        context: ToolContext,
+    ) -> ToolResult:
         started = time.monotonic()
         try:
             output = definition.handler(arguments, context)
         except ToolExecutionError as exc:
-            return self._error(name, tool_call_id, "TOOL_ERROR", str(exc))
+            return self._result(name, call_id, "error", "TOOL_ERROR", str(exc))
         except Exception:
             # 工具内部异常不暴露给模型（可能含内部结构）。
             logger.exception("工具执行异常", extra={"tool": name})
-            return self._error(name, tool_call_id, "TOOL_CRASHED", "工具执行失败。")
+            return self._result(name, call_id, "error", "TOOL_CRASHED", "工具执行失败。")
         finally:
             logger.info(
                 "工具调用",
                 extra={
                     "tool": name,
+                    "risk": definition.risk.value,
                     "duration_ms": round((time.monotonic() - started) * 1000, 1),
                 },
             )
 
-        return ToolResult(
-            tool_call_id=tool_call_id,
-            name=name,
-            status="ok",
-            content=_encode_output(output),
-        )
+        return self._result(name, call_id, "ok", None, _encode_output(output))
 
-    def _denied(self, name: str, call_id: str, code: str, message: str) -> ToolResult:
-        return ToolResult(call_id, name, "denied", message, error_code=code)
-
-    def _error(self, name: str, call_id: str, code: str, message: str) -> ToolResult:
-        return ToolResult(call_id, name, "error", message, error_code=code)
+    def _result(
+        self, name: str, call_id: str, status: str, code: str | None, content: str
+    ) -> ToolResult:
+        return ToolResult(call_id, name, status, content, error_code=code)
 
 
 def _encode_output(output: Any) -> str:

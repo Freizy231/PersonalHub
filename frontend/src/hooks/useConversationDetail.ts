@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from '../services/api'
+import { getSessionToken } from '../services/session'
 import { streamChat } from '../services/stream'
-import type { Conversation, Message } from '../types/api'
+import type { ApprovalRequestEvent, Conversation, Message } from '../types/api'
 
 export const MESSAGE_MAX_LENGTH = 100_000
 const PAGE_SIZE = 200
@@ -30,6 +31,12 @@ export interface UseConversationDetail {
   streamingText: string | null
   /** 本轮的工具调用记录，用于向用户展示 AI 做了什么。 */
   toolActivity: ToolActivity[]
+  /** 等待用户确认的审批请求；非 null 时对话已暂停。 */
+  pendingApproval: ApprovalRequestEvent | null
+  /** 对审批做出决定，随后对话继续。 */
+  decideApproval: (decision: 'approve' | 'reject', remember: boolean) => Promise<void>
+  /** 正在提交审批决定。 */
+  deciding: boolean
   sending: boolean
   sendError: string | null
   send: (content: string) => Promise<boolean>
@@ -57,6 +64,8 @@ export function useConversationDetail(conversationId: string): UseConversationDe
   })
   const [streamingText, setStreamingText] = useState<string | null>(null)
   const [toolActivity, setToolActivity] = useState<ToolActivity[]>([])
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRequestEvent | null>(null)
+  const [deciding, setDeciding] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
 
@@ -121,6 +130,7 @@ export function useConversationDetail(conversationId: string): UseConversationDe
       setSendError(null)
       setStreamingText('')
       setToolActivity([])
+      setPendingApproval(null)
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -145,6 +155,15 @@ export function useConversationDetail(conversationId: string): UseConversationDe
           onDelta: (text) => {
             accumulated += text
             if (mounted.current) setStreamingText(accumulated)
+          },
+          onApprovalRequired: (payload) => {
+            if (!mounted.current) return
+            setPendingApproval({
+              approval_id: payload.approval_id,
+              tool: payload.tool,
+              preview: payload.preview,
+              expires_in: payload.expires_in,
+            })
           },
           onToolStart: (payload) => {
             if (!mounted.current) return
@@ -205,10 +224,34 @@ export function useConversationDetail(conversationId: string): UseConversationDe
     abortRef.current?.abort()
   }, [])
 
+  const decideApproval = useCallback(
+    async (decision: 'approve' | 'reject', remember: boolean) => {
+      const approval = pendingApproval
+      if (!approval) return
+      setDeciding(true)
+      const result = await api.approvals.decide(approval.approval_id, decision, {
+        rememberForSession: remember,
+        sessionToken: getSessionToken(),
+      })
+      if (!mounted.current) return
+      setDeciding(false)
+      if (result.ok) {
+        // 清除卡片；后端会唤醒对话并继续推送 delta。
+        setPendingApproval(null)
+      } else {
+        setSendError(result.message)
+      }
+    },
+    [pendingApproval],
+  )
+
   return {
     state,
     streamingText,
     toolActivity,
+    pendingApproval,
+    decideApproval,
+    deciding,
     sending,
     sendError,
     send,

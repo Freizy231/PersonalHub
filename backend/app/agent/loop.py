@@ -116,15 +116,8 @@ async def run_agent_loop(
 
         for call in calls:
             yield AgentEvent(kind="tool_start", payload={"id": call.id, "name": call.name})
-            result = broker.execute(call.name, call.arguments, context)
-            # Broker 不知道 call_id（它在执行时还没有），这里补上。
-            result = ToolResult(
-                tool_call_id=call.id,
-                name=result.name,
-                status=result.status,
-                content=result.content,
-                error_code=result.error_code,
-            )
+            # Broker 是 async：写操作会在这里暂停、等待用户审批。
+            result = await broker.execute(call.name, call.arguments, context, call_id=call.id)
             conversation.append(_tool_message(result))
             yield AgentEvent(
                 kind="tool_end",
@@ -133,6 +126,7 @@ async def run_agent_loop(
                     "name": call.name,
                     "status": result.status,
                     "error_code": result.error_code,
+                    "approval_id": result.approval_id,
                 },
             )
 
@@ -181,16 +175,28 @@ def _tool_message(result: ToolResult) -> ChatMessage:
 
     关键：明确标注这是**工具输出、属于不可信数据**，
     防止工具返回内容被模型当成新的系统指令（§8.4 间接注入）。
+
+    对 denied 状态额外给出指引：实测发现模型面对"被拒绝"时倾向于
+    含糊带过（例如只说"结果无法解析"）。明确告诉它如实告知用户是必要的，
+    否则用户会以为操作成功了。
     """
-    body = json.dumps(
-        {
-            "source": "tool",
-            "trust": "untrusted",
-            "tool": result.name,
-            "status": result.status,
-            **({"error_code": result.error_code} if result.error_code else {}),
-            "result": result.content,
-        },
-        ensure_ascii=False,
+    payload: dict[str, object] = {
+        "source": "tool",
+        "trust": "untrusted",
+        "tool": result.name,
+        "status": result.status,
+        **({"error_code": result.error_code} if result.error_code else {}),
+        "result": result.content,
+    }
+    if result.status == "denied":
+        payload["instruction"] = (
+            "该操作被拒绝，未执行任何更改。请如实告知用户操作没有完成及原因，不要声称已完成。"
+        )
+    elif result.status == "error":
+        payload["instruction"] = "该操作失败，未产生预期结果。请如实说明，不要编造结果。"
+
+    return ChatMessage(
+        role="tool",
+        content=json.dumps(payload, ensure_ascii=False),
+        tool_call_id=result.tool_call_id,
     )
-    return ChatMessage(role="tool", content=body, tool_call_id=result.tool_call_id)

@@ -5,11 +5,20 @@
  * 用 POST + fetch 读取响应流更安全，也便于携带取消信号。
  */
 
+import { getSessionToken } from './session'
+
 export interface StreamHandlers {
   onDelta: (text: string) => void
   /** 工具调用的开始与结束。让用户看得见 AI 在做什么（AGENT.md §7.4 可理解摘要）。 */
   onToolStart?: (payload: { id: string; name: string }) => void
   onToolEnd?: (payload: { id: string; name: string; status: string; error_code?: string }) => void
+  /** 需要用户审批。收到后对话会暂停，直到调用 approvals.decide。 */
+  onApprovalRequired?: (payload: {
+    approval_id: string
+    tool: string
+    preview: string
+    expires_in: number
+  }) => void
   onDone: (payload: { message_id: string }) => void
   onError: (payload: { code: string; message: string }) => void
 }
@@ -50,7 +59,12 @@ export async function streamChat(
   try {
     response = await fetch('/api/v1/chat/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        // 会话令牌：后端据此判断该浏览器会话是否勾选过"不再询问"。
+        'X-Session-Token': getSessionToken(),
+      },
       body: JSON.stringify({ conversation_id: conversationId, content }),
       signal,
     })
@@ -95,6 +109,10 @@ export async function streamChat(
         if (frame.event === 'delta') {
           const text = (payload as { text?: unknown }).text
           if (typeof text === 'string') handlers.onDelta(text)
+        } else if (frame.event === 'approval_required') {
+          handlers.onApprovalRequired?.(
+            payload as { approval_id: string; tool: string; preview: string; expires_in: number },
+          )
         } else if (frame.event === 'tool_start') {
           handlers.onToolStart?.(payload as { id: string; name: string })
         } else if (frame.event === 'tool_end') {

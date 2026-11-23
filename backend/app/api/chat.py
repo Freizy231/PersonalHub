@@ -17,6 +17,7 @@ EventSource 只支持 GET，无法携带消息正文；而且 GET 会把内容�
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -24,7 +25,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from app.agent.loop import run_agent_loop
+from app.agent.loop import AgentEvent, run_agent_loop
 from app.ai import ChatMessage, ProviderConfigurationError, ProviderError, read_api_key
 from app.ai.openai_compatible import OpenAICompatibleProvider
 from app.api.deps import ConversationRepoDep, MessageRepoDep
@@ -34,6 +35,7 @@ from app.core.audit import EgressRecord, record_egress
 from app.core.config import Settings
 from app.core.errors import PublicMessageError
 from app.models.conversation import DEFAULT_WORKSPACE_ID
+from app.policy.waiter import get_waiter
 from app.schemas.chat import ChatStreamRequest
 from app.services.memory import approved_memories, extract_candidates, save_candidates
 
@@ -86,6 +88,10 @@ def _config_hint(settings: Settings, reason: str) -> str:
         f"{settings.provider_base_url or '未设置'}，密钥变量：{settings.api_key_env}。"
         "配置完成后需重启后端。"
     )
+
+
+# 循环结束哨兵：让消费者知道后台任务已经产出全部事件。
+_LOOP_FINISHED = AgentEvent(kind="loop_finished")
 
 
 def build_memory_block(session_factory) -> ChatMessage | None:  # type: ignore[no-untyped-def]
@@ -168,7 +174,34 @@ async def stream_chat(
     session_factory = request.app.state.session_factory
     # 工具能力来自应用级注册表；本请求只读取，不修改。
     registry = request.app.state.tool_registry
-    broker = ToolBroker(registry)
+    session_token = request.headers.get("X-Session-Token")
+    waiter = get_waiter()
+
+    # 审批事件需要经 SSE 推给前端，而 SSE 由 event_stream 生成。
+    # 用一个队列把 resolver 里发生的"需要确认"事件送进将要 yield 的生成器：
+    # Agent 循环在 Broker 处 await 用户决定，期间这里仍要能产出 SSE 帧，
+    # 否则前端永远收不到审批卡片（死锁）。
+    approval_events: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+    async def approval_resolver(req) -> bool:  # type: ignore[no-untyped-def]
+        """把审批请求推给前端，然后等待用户决定。超时按拒绝处理。"""
+        await approval_events.put(
+            {
+                "kind": "approval_required",
+                "approval_id": req.approval_id,
+                "tool": req.tool_name,
+                "preview": req.preview,
+                "expires_in": req.expires_in_seconds,
+            }
+        )
+        return await waiter.wait(req.approval_id, timeout=req.expires_in_seconds)
+
+    broker = ToolBroker(
+        registry,
+        session_factory=session_factory,
+        approval_resolver=approval_resolver,
+        session_grants=request.app.state.session_grants.tools_for(session_token),
+    )
 
     # 供应商未配置时立即返回明确错误，而不是开始一个注定失败的流。
     try:
@@ -217,19 +250,56 @@ async def stream_chat(
         error_code: str | None = None
 
         try:
-            # M5：改由 Agent Loop 驱动，模型可在回答过程中发起工具调用。
-            # 所有工具调用都经 Tool Broker，Agent 无法直接触碰数据。
-            async for event in run_agent_loop(
-                provider=provider,
-                model=settings.model,
-                messages=chat_messages,
-                broker=broker,
-                tools=registry.specs_for_model(),
-                context=ToolContext(
-                    workspace_id=DEFAULT_WORKSPACE_ID,
-                    conversation_id=payload.conversation_id,
-                ),
-            ):
+            # Agent 循环与 SSE 输出解耦：循环在后台任务里跑（它可能在
+            # await 用户审批），这里同时消费"循环事件"与"审批请求"两个队列
+            # 并转成 SSE。不这样做会死锁：前端等审批卡片，卡片要等循环让出。
+            loop_events: asyncio.Queue[AgentEvent] = asyncio.Queue()
+
+            async def drive_loop() -> None:
+                try:
+                    async for item in run_agent_loop(
+                        provider=provider,
+                        model=settings.model,
+                        messages=chat_messages,
+                        broker=broker,
+                        tools=registry.specs_for_model(),
+                        context=ToolContext(
+                            workspace_id=DEFAULT_WORKSPACE_ID,
+                            conversation_id=payload.conversation_id,
+                        ),
+                    ):
+                        await loop_events.put(item)
+                finally:
+                    await loop_events.put(_LOOP_FINISHED)  # type: ignore[arg-type]
+
+            loop_task = asyncio.create_task(drive_loop())
+            loop_done = False
+
+            while not (loop_done and loop_events.empty() and approval_events.empty()):
+                # 1) 优先把等待中的审批请求送出去（非阻塞）。
+                while not approval_events.empty():
+                    yield _sse("approval_required", approval_events.get_nowait())
+
+                # 2) 再取一个循环事件；与审批队列一起等待，避免轮询空转。
+                loop_get = asyncio.create_task(loop_events.get())
+                approval_get = asyncio.create_task(approval_events.get())
+                done, pending_waiters = await asyncio.wait(
+                    {loop_get, approval_get}, return_when=asyncio.FIRST_COMPLETED
+                )
+                for waiter_task in pending_waiters:
+                    waiter_task.cancel()
+
+                if approval_get in done:
+                    yield _sse("approval_required", approval_get.result())
+
+                if loop_get not in done:
+                    continue
+
+                event = loop_get.result()
+                if event.kind == "loop_finished":
+                    loop_done = True
+                    continue
+
                 if event.kind == "delta":
                     collected.append(event.text)
                     yield _sse("delta", {"text": event.text})
@@ -246,9 +316,13 @@ async def stream_chat(
                     yield _sse("tool_end", event.payload)
                 elif event.kind == "error":
                     outcome, error_code = "failed", str(event.payload.get("code", "ERROR"))
+                    loop_task.cancel()
                     yield _sse("error", event.payload)
                     return
                 # done 事件不携带全文，文本已通过 delta 累加，无需再处理。
+
+            # 循环结束后等后台任务收尾（它可能还在 finally 里）。
+            await asyncio.gather(loop_task, return_exceptions=True)
 
             reply = "".join(collected).strip()
             if not reply:

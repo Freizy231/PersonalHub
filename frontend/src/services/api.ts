@@ -13,6 +13,8 @@ import type {
   Conversation,
   ConversationList,
   HealthResponse,
+  Approval,
+  ApprovalList,
   MemoryItem,
   MemoryList,
   Message,
@@ -154,6 +156,30 @@ export const api = {
           body: JSON.stringify({ content }),
         }),
     },
+  },
+
+  approvals: {
+    list: (status?: string) => {
+      const params = new URLSearchParams()
+      if (status) params.set('status', status)
+      const qs = params.toString()
+      return request<ApprovalList>(`/approvals${qs ? `?${qs}` : ''}`)
+    },
+
+    decide: (
+      id: string,
+      decision: 'approve' | 'reject',
+      options: { rememberForSession?: boolean; sessionToken?: string } = {},
+    ) =>
+      request<Approval>(`/approvals/${encodeURIComponent(id)}/decide`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          decision,
+          remember_for_session: options.rememberForSession ?? false,
+          session_token: options.sessionToken ?? null,
+        }),
+      }),
   },
 
   memory: {

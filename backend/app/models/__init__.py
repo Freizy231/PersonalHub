@@ -4,21 +4,26 @@
   M2: conversations / messages
   M4: memory_items / memory_sources
   M5: tool_invocations
+  M6: tasks / approvals
 """
 
 from __future__ import annotations
 
+from app.models.approval import Approval
 from app.models.base import Base
 from app.models.conversation import Conversation
 from app.models.memory import MemoryItem, MemorySource
 from app.models.message import Message
+from app.models.task import Task
 from app.models.tool_invocation import ToolInvocation
 
 __all__ = [
+    "Approval",
     "Base",
     "Conversation",
     "MemoryItem",
     "MemorySource",
     "Message",
+    "Task",
     "ToolInvocation",
 ]
