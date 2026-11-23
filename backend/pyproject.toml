@@ -1,0 +1,32 @@
+[project]
+name = "personal-hub"
+version = "0.0.1"
+description = "Personal Hub — Local-first personal AI environment (MVP)"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+    "httpx>=0.28,<1",
+    "ruff>=0.9,<1",
+]
+
+# 本目录是应用而非可分发库，uv 只负责解析依赖和虚拟环境，不做打包。
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

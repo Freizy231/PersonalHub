@@ -20,12 +20,18 @@
 
 ### M1 — Frontend/Backend Skeleton — 进行中
 
-待完成，任务清单见 `docs/ENVIRONMENT_AUDIT.md` 第 7 节：
-- [ ] 后端 `uv` 环境（Python 3.12）
-- [ ] `GET /api/v1/health` + Pytest
-- [ ] React + Vite 前端骨架
-- [ ] 前端展示健康状态
-- [ ] 回环绑定与 CORS 白名单
+已完成：
+- [x] 后端 `uv` 环境（Python 3.12.3，`uv.lock` 锁定 FastAPI 0.165.0 / Pydantic 2.14.4）
+- [x] `GET /api/v1/health` + 26 项 Pytest（健康检查、错误结构、CORS、配置、日志脱敏）
+- [x] React 19 + Vite 8 前端骨架（严格类型检查通过）
+- [x] 前端展示健康状态：在线 / 离线 / 超时 / 连点竞态
+- [x] 回环绑定（8000 与 5173 均实测仅 `127.0.0.1`）与 CORS 白名单
+- [x] `scripts/dev.sh` 一键启动，进程组清理验证无孤儿进程
+- [x] 真实浏览器（Edge 无头）验证：在线、断线、恢复、暗色、窄屏
+
+待完成：
+- [ ] 前端单元测试（M1 验收未强制，但 §9.2 建议在引入交互逻辑时补充）
+- [ ] 后端生产态同源提供前端静态文件（当前为 Vite 开发代理）
 
 ### M2 — SQLite Persistence — 未开始
 
