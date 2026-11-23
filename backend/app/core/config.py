@@ -64,6 +64,18 @@ DEFAULT_DEV_ORIGINS = (
     "http://localhost:5173",
 )
 
+# 官方 DeepSeek 接口地址。中转站/自建网关必须显式配置 PH_PROVIDER_BASE_URL，
+# 不要把别人的地址当默认值——发错地址会让用户拿着有效 Key 得到 401 却无从判断。
+DEEPSEEK_OFFICIAL_BASE_URL = "https://api.deepseek.com"
+
+
+def _default_base_url() -> str:
+    provider = _env_str("PH_PROVIDER", "deepseek")
+    if provider == "deepseek":
+        return DEEPSEEK_OFFICIAL_BASE_URL
+    # 非官方供应商没有通用默认地址；留空会让用户在启动时就被提示去配置。
+    return ""
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -82,9 +94,10 @@ class Settings:
     # 密钥一旦进入配置对象就很容易泄漏。Key 只在需要时从环境变量直接读取（见 app/ai）。
     provider: str = field(default_factory=lambda: _env_str("PH_PROVIDER", "deepseek"))
     model: str = field(default_factory=lambda: _env_str("PH_MODEL", "deepseek-chat"))
-    provider_base_url: str = field(
-        default_factory=lambda: _env_str("PH_PROVIDER_BASE_URL", "https://api.deepseek.com")
-    )
+    # 未显式设置时按 provider 推导：deepseek 用官方地址，其余必须由用户提供。
+    provider_base_url: str = field(default_factory=lambda: _default_base_url())
+    # 存放密钥的环境变量名。中转站用户可能沿用不同变量名，允许覆盖。
+    api_key_env: str = field(default_factory=lambda: _env_str("PH_API_KEY_ENV", "DEEPSEEK_API_KEY"))
 
     @property
     def db_path(self) -> Path:
@@ -99,7 +112,8 @@ class Settings:
             data_dir=_env_path("PH_DATA_DIR", default_data_dir()),
             provider=_env_str("PH_PROVIDER", "deepseek"),
             model=_env_str("PH_MODEL", "deepseek-chat"),
-            provider_base_url=_env_str("PH_PROVIDER_BASE_URL", "https://api.deepseek.com"),
+            provider_base_url=_env_str("PH_PROVIDER_BASE_URL", _default_base_url()),
+            api_key_env=_env_str("PH_API_KEY_ENV", "DEEPSEEK_API_KEY"),
         )
 
 

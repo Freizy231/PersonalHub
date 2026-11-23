@@ -269,3 +269,50 @@ class TestDatetimeContract:
 
         parsed = datetime.fromisoformat(body["created_at"].replace("Z", "+00:00"))
         assert parsed.tzinfo is not None
+
+
+class TestSchemaNotMigrated:
+    """回归：新数据目录未迁移时，用户只看到无意义的"服务器内部错误"。"""
+
+    def test_missing_tables_returns_actionable_message(self, tmp_path) -> None:
+        from fastapi.testclient import TestClient as TC
+
+        from app.core.config import Settings
+        from app.main import create_app
+
+        # 刻意不执行迁移
+        settings = Settings(data_dir=tmp_path / "unmigrated")
+        with TC(create_app(settings)) as client:
+            response = client.post(API, json={"title": "x"})
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "DATABASE_NOT_MIGRATED"
+        assert "alembic upgrade head" in error["message"]
+
+    def test_startup_logs_missing_tables(self, tmp_path, caplog) -> None:
+        import logging as _logging
+
+        from fastapi.testclient import TestClient as TC
+
+        from app.core.config import Settings
+        from app.main import create_app
+
+        caplog.set_level(_logging.ERROR, logger="app.main")
+        with TC(create_app(Settings(data_dir=tmp_path / "unmigrated2"))):
+            pass
+
+        records = [r for r in caplog.records if "缺少数据表" in r.getMessage()]
+        assert records, "启动时必须提示缺少数据表"
+        assert records[0].missing_tables
+        assert "alembic upgrade head" in records[0].remedy
+
+    def test_migrated_database_has_no_missing_tables(self, settings, db_path) -> None:
+        from app.main import check_schema
+        from app.storage.database import build_engine
+
+        engine = build_engine(settings.db_path)
+        try:
+            assert check_schema(engine) == []
+        finally:
+            engine.dispose()

@@ -41,13 +41,32 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 
 模型需要 API Key，**只在后端设置**，绝不要写进前端：
 
+官方 DeepSeek：
+
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
-# 可选
-export PH_MODEL="deepseek-chat"
-export PH_PROVIDER_BASE_URL="https://api.deepseek.com"
 ./scripts/dev.sh
 ```
+
+中转站 / 自建 OpenAI 兼容网关（**必须显式配置地址**）：
+
+```bash
+export PH_PROVIDER="openai-compatible"
+export PH_PROVIDER_BASE_URL="https://你的中转站/v1"   # 注意带 /v1
+export DEEPSEEK_API_KEY="中转站给你的 Key"            # 变量名可用 PH_API_KEY_ENV 改
+export PH_MODEL="deepseek-chat"                      # 按中转站支持的模型名填
+./scripts/dev.sh
+```
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `PH_PROVIDER` | `deepseek` | `deepseek` 或 `openai-compatible` |
+| `PH_PROVIDER_BASE_URL` | `https://api.deepseek.com` | 请求地址为 `{base_url}/chat/completions` |
+| `PH_MODEL` | `deepseek-chat` | 模型名 |
+| `PH_API_KEY_ENV` | `DEEPSEEK_API_KEY` | 存放密钥的环境变量名 |
+
+> **Key 与地址必须配套。** 中转站的 Key 发到官方地址会返回 401——两者不通用。
+> 本机/局域网地址（如 `192.168.x.x`）会自动直连，不走代理。
 
 未设置 Key 时，对话接口返回明确的配置错误，其余功能正常。
 

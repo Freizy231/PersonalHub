@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.ai import ChatMessage, ProviderConfigurationError, ProviderError, read_api_key
-from app.ai.deepseek import DeepSeekProvider
+from app.ai.openai_compatible import OpenAICompatibleProvider
 from app.api.deps import ConversationRepoDep, MessageRepoDep
 from app.core.audit import EgressRecord, record_egress
 from app.core.config import Settings
@@ -40,17 +40,47 @@ logger = logging.getLogger(__name__)
 # MVP 先用简单的条数截断；M4 的 Context Engine 会做真正的预算管理。
 MAX_HISTORY_MESSAGES = 40
 
+# 支持的供应商标识。deepseek 与 openai-compatible 共用同一个适配器，
+# 区别只在默认地址；中转站请设 PH_PROVIDER=openai-compatible 并显式给出地址。
+SUPPORTED_PROVIDERS = frozenset({"deepseek", "openai-compatible"})
+
 
 def _sse(event: str, data: dict[str, object]) -> str:
     """构造一条 SSE 事件。data 用 JSON，避免换行破坏 SSE 帧格式。"""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def build_provider(settings: Settings) -> DeepSeekProvider:
-    """按配置构造供应商。当前只有 DeepSeek；后续在这里扩展分支。"""
-    if settings.provider != "deepseek":
+def build_provider(settings: Settings) -> OpenAICompatibleProvider:
+    """按配置构造供应商。
+
+    provider 取值：
+      - deepseek            : 官方 DeepSeek（默认地址 https://api.deepseek.com）
+      - openai-compatible   : 任意 OpenAI 兼容网关/中转站（必须显式配置地址）
+    """
+    if settings.provider not in SUPPORTED_PROVIDERS:
         raise ProviderConfigurationError(f"暂不支持的供应商：{settings.provider}")
-    return DeepSeekProvider(read_api_key("DEEPSEEK_API_KEY"), base_url=settings.provider_base_url)
+    if not settings.provider_base_url:
+        # 没有默认地址的供应商必须显式配置，避免把 Key 发到错误的服务器。
+        raise ProviderConfigurationError(
+            f"供应商 {settings.provider} 需要设置 PH_PROVIDER_BASE_URL（例如 https://你的网关/v1）。"
+        )
+    return OpenAICompatibleProvider(
+        read_api_key(settings.api_key_env),
+        base_url=settings.provider_base_url,
+        name=settings.provider,
+    )
+
+
+def _config_hint(settings: Settings, reason: str) -> str:
+    """把配置异常翻译成用户能照着做的提示。
+
+    reason 来自 ProviderConfigurationError，内容是本模块写死的固定文案，可安全外露。
+    """
+    return (
+        f"{reason} 当前供应商：{settings.provider}，接口地址："
+        f"{settings.provider_base_url or '未设置'}，密钥变量：{settings.api_key_env}。"
+        "配置完成后需重启后端。"
+    )
 
 
 @router.post("/stream", summary="流式对话")
@@ -74,7 +104,7 @@ async def stream_chat(
         raise PublicMessageError(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             code="PROVIDER_NOT_CONFIGURED",
-            message=("模型服务未配置。请在后端环境变量中设置 DEEPSEEK_API_KEY 后重启服务。"),
+            message=_config_hint(settings, str(exc)),
         ) from exc
 
     # 1) 先保存用户消息。即使用户随后取消，他的提问也不该丢。

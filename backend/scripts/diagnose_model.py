@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx  # noqa: E402
 
-from app.ai.deepseek import _resolve_proxy  # noqa: E402
+from app.ai.openai_compatible import _resolve_proxy  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 
 ENV_NAME = "DEEPSEEK_API_KEY"

@@ -111,3 +111,27 @@
 取消时用户消息保留（提问不丢），助手回复丢弃。
 
 **已验证**：真实 HTTP 断开后，审计记录 `aborted`，数据库仅存用户消息。
+
+---
+
+## D-007：模型适配器改为通用 OpenAI 兼容实现
+
+- 日期：2026-11-23
+- 状态：已实施（修正 D-001 的过窄假设）
+
+**背景**：用户配置中转站 Key 后得到 401。根因是请求地址默认为官方
+`https://api.deepseek.com`，而中转站的 Key 只在中转站有效。
+
+**决定**：
+
+1. `DeepSeekProvider` 重命名为 `OpenAICompatibleProvider`（`app/ai/openai_compatible.py`）。
+   中转站本质是 OpenAI 兼容网关，不应与 DeepSeek 绑定。
+2. `PH_PROVIDER` 增加取值 `openai-compatible`。此时**没有默认地址**，
+   必须显式配置 `PH_PROVIDER_BASE_URL`，避免把 Key 发到错误服务器。
+3. 新增 `PH_API_KEY_ENV`，允许中转站使用自己的环境变量名。
+4. 401 / 404 的错误提示同时给出实际请求地址，并说明"Key 与地址必须配套"。
+5. 局域网与本机地址（`127.0.0.1`、`localhost`、`10.x`、`172.16-31.x`、`192.168.x`、
+   `169.254.x`）一律直连，不走 HTTP 代理。
+
+**验证**：用本地模拟中转站（路径 `/v1/chat/completions`，校验特定 Key）端到端验证：
+正确 Key 流式成功、错误 Key 返回明确的地址+Key 提示、`/v1` 前缀拼接正确。

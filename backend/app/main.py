@@ -7,11 +7,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect
 
 from app.api import chat, conversations, health, messages
 from app.core.config import Settings, get_settings
@@ -19,6 +21,21 @@ from app.core.errors import install_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIDMiddleware
 from app.storage.database import build_engine, build_session_factory
+
+logger = logging.getLogger(__name__)
+
+# 启动时必须存在的表。缺失说明数据库没跑过 Alembic 迁移。
+REQUIRED_TABLES = frozenset({"conversations", "messages"})
+
+
+def check_schema(engine) -> list[str]:  # type: ignore[no-untyped-def]
+    """返回缺失的表名。
+
+    实测教训：新数据目录下启动服务，用户只会看到"服务器内部错误"的 500，
+    完全不知道需要执行迁移。这里在启动时就检查并明确提示。
+    """
+    existing = set(inspect(engine).get_table_names())
+    return sorted(REQUIRED_TABLES - existing)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -30,6 +47,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # 启动时不做任何建表：Schema 只由 Alembic 迁移建立（AGENT.md §9.4）。
+        missing = check_schema(engine)
+        if missing:
+            logger.error(
+                "数据库缺少数据表，请先执行迁移",
+                extra={
+                    "db_path": str(settings.db_path),
+                    "missing_tables": missing,
+                    "remedy": "cd backend && uv run alembic upgrade head",
+                },
+            )
         yield
         engine.dispose()
 

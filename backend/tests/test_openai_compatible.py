@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from app.ai import ChatMessage, ProviderError
-from app.ai.deepseek import DeepSeekProvider, _parse_sse_line
+from app.ai.openai_compatible import OpenAICompatibleProvider, _parse_sse_line
 
 FAKE_KEY = "sk-test-SECRET-DO-NOT-LEAK-12345"
 
@@ -26,16 +26,16 @@ def _sse_body(chunks: list[str]) -> bytes:
     return ("\n\n".join(lines) + "\n\n").encode()
 
 
-async def _collect(provider: DeepSeekProvider, messages, model="deepseek-chat") -> str:
+async def _collect(provider: OpenAICompatibleProvider, messages, model="deepseek-chat") -> str:
     parts = []
     async for chunk in provider.stream_chat(messages, model):
         parts.append(chunk.delta)
     return "".join(parts)
 
 
-def _provider_with(handler) -> DeepSeekProvider:
+def _provider_with(handler) -> OpenAICompatibleProvider:
     """使用 MockTransport 注入，避免任何真实网络请求。"""
-    return DeepSeekProvider(
+    return OpenAICompatibleProvider(
         FAKE_KEY,
         base_url="https://api.example.test",
         transport=httpx.MockTransport(handler),
@@ -162,14 +162,14 @@ class TestProxyHandling:
     """实测发现的崩溃：环境变量 ALL_PROXY=socks://... 会让 httpx 抛 ValueError。"""
 
     def test_loopback_never_uses_proxy(self, monkeypatch) -> None:
-        from app.ai.deepseek import _resolve_proxy
+        from app.ai.openai_compatible import _resolve_proxy
 
         monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
         assert _resolve_proxy("http://127.0.0.1:8899") is None
         assert _resolve_proxy("http://localhost:8899") is None
 
     def test_socks_proxy_is_ignored_not_crashing(self, monkeypatch) -> None:
-        from app.ai.deepseek import _resolve_proxy
+        from app.ai.openai_compatible import _resolve_proxy
 
         monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:7897/")
         monkeypatch.delenv("HTTPS_PROXY", raising=False)
@@ -178,7 +178,7 @@ class TestProxyHandling:
         assert _resolve_proxy("https://api.deepseek.com") is None
 
     def test_http_proxy_is_used_for_remote_host(self, monkeypatch) -> None:
-        from app.ai.deepseek import _resolve_proxy
+        from app.ai.openai_compatible import _resolve_proxy
 
         monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
         assert _resolve_proxy("https://api.deepseek.com") == "http://127.0.0.1:7897"
@@ -197,3 +197,105 @@ class TestProxyHandling:
         result = await _collect(_provider_with(handler), [ChatMessage("user", "x")])
 
         assert result == "ok"
+
+
+class TestBaseUrlHandling:
+    """回归：用户把中转站 Key 发到了官方地址，得到 401 却无从判断。"""
+
+    @pytest.mark.asyncio
+    async def test_custom_base_url_with_v1_prefix(self) -> None:
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["url"] = str(request.url)
+            return httpx.Response(
+                200, content=_sse_body(["ok"]), headers={"content-type": "text/event-stream"}
+            )
+
+        provider = OpenAICompatibleProvider(
+            FAKE_KEY,
+            base_url="https://relay.example.com/v1",
+            transport=httpx.MockTransport(handler),
+        )
+        await _collect(provider, [ChatMessage("user", "x")])
+
+        # 关键：/v1 前缀必须保留，不能多也不能少。
+        assert seen["url"] == "https://relay.example.com/v1/chat/completions"
+
+    @pytest.mark.asyncio
+    async def test_trailing_slash_stripped(self) -> None:
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["url"] = str(request.url)
+            return httpx.Response(200, content=_sse_body(["x"]), headers={})
+
+        provider = OpenAICompatibleProvider(
+            FAKE_KEY,
+            base_url="https://relay.example.com/v1/",
+            transport=httpx.MockTransport(handler),
+        )
+        await _collect(provider, [ChatMessage("user", "x")])
+
+        assert seen["url"] == "https://relay.example.com/v1/chat/completions"
+
+    @pytest.mark.asyncio
+    async def test_401_message_mentions_base_url_and_key_mismatch(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, json={"error": {"message": "invalid"}})
+
+        provider = OpenAICompatibleProvider(
+            FAKE_KEY, base_url="https://api.deepseek.com", transport=httpx.MockTransport(handler)
+        )
+        with pytest.raises(ProviderError) as excinfo:
+            await _collect(provider, [ChatMessage("user", "x")])
+
+        message = str(excinfo.value)
+        # 必须让用户意识到：可能是 Key 不属于这个地址。
+        assert "https://api.deepseek.com" in message
+        assert "接口地址" in message
+
+    @pytest.mark.asyncio
+    async def test_404_message_points_to_base_url_config(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, text="Not Found")
+
+        provider = OpenAICompatibleProvider(
+            FAKE_KEY, base_url="https://relay.example.com", transport=httpx.MockTransport(handler)
+        )
+        with pytest.raises(ProviderError) as excinfo:
+            await _collect(provider, [ChatMessage("user", "x")])
+
+        assert excinfo.value.code == "PROVIDER_NOT_FOUND"
+        assert "PH_PROVIDER_BASE_URL" in str(excinfo.value)
+
+
+class TestLocalHostDetection:
+    """局域网/本机地址不能走代理。"""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1:8080",
+            "http://localhost:3000/v1",
+            "http://192.168.1.10:8000/v1",
+            "http://10.0.0.5/v1",
+            "http://172.16.3.4:9000",
+        ],
+    )
+    def test_private_addresses_bypass_proxy(self, url: str, monkeypatch) -> None:
+        from app.ai.openai_compatible import _resolve_proxy
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+        assert _resolve_proxy(url) is None
+
+    @pytest.mark.parametrize(
+        "url",
+        ["https://api.deepseek.com", "https://relay.example.com/v1", "https://8.8.8.8"],
+    )
+    def test_public_addresses_use_proxy(self, url: str, monkeypatch) -> None:
+        from app.ai.openai_compatible import _resolve_proxy
+
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7897")
+        monkeypatch.delenv("ALL_PROXY", raising=False)
+        assert _resolve_proxy(url) == "http://127.0.0.1:7897"
