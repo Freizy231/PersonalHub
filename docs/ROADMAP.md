@@ -9,19 +9,23 @@
 已完成：
 - [x] 读取 `AGENT.md` / `AGENTS.md`，确认当前里程碑
 - [x] 审计 OS、工具链、Python 解释器、磁盘、网络
-- [x] 审计仓库状态与已有资产（含仓库外既有实现）
+- [x] 审计仓库状态与仓库外既有资产
 - [x] 建立 `.gitignore` 并用 `git check-ignore` 逐条验证
 - [x] 首个基线提交 `817aceb`
 - [x] `docs/ENVIRONMENT_AUDIT.md` 审计报告
 - [x] `README.md` 初稿
+- [x] 技术选型确认：React + TypeScript + Vite（与规范一致）
+- [x] 确认 v0.14.2 历史版本与本项目无关，不复用
+- [x] SSH 到 GitHub 认证验证成功
 
-未完成（阻塞于用户决策）：
-- [ ] 前端技术基线确认（React 按规范 vs Vue 3 复用既有实现）
-- [ ] 既有 v0.14.2 实现与本仓库的关系确认
+### M1 — Frontend/Backend Skeleton — 进行中
 
-### M1 — Frontend/Backend Skeleton — 未开始
-
-待 M0 决策后展开，任务清单见 `docs/ENVIRONMENT_AUDIT.md` 第 7 节。
+待完成，任务清单见 `docs/ENVIRONMENT_AUDIT.md` 第 7 节：
+- [ ] 后端 `uv` 环境（Python 3.12）
+- [ ] `GET /api/v1/health` + Pytest
+- [ ] React + Vite 前端骨架
+- [ ] 前端展示健康状态
+- [ ] 回环绑定与 CORS 白名单
 
 ### M2 — SQLite Persistence — 未开始
 

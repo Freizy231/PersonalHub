@@ -4,7 +4,10 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 
 ## 当前状态
 
-项目处于 **M0 — Repository & Environment Audit**，仓库中只有规范与文档，尚无应用代码。
+项目处于 **M1 — Frontend/Backend Skeleton**，正在从零构建 MVP。已确认技术选型：后端 Python + FastAPI，
+前端 **React + TypeScript + Vite**。
+
+> 历史版本 v0.14.2 与本项目无关联，不作为参考实现，其源码与数据不导入本项目。
 
 - 主规范：[`AGENT.md`](AGENT.md)（权威项目上下文、架构、里程碑与验收标准）
 - Agent 入口：[`AGENTS.md`](AGENTS.md)
@@ -15,8 +18,8 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| M0 | 仓库与环境审计 | 进行中 |
-| M1 | 前后端骨架 + 健康检查 | 未开始 |
+| M0 | 仓库与环境审计 | 已完成 |
+| M1 | 前后端骨架 + 健康检查 | 进行中 |
 | M2 | SQLite 持久化 | 未开始 |
 | M3 | AI Workspace（接入模型） | 未开始 |
 | M4 | 记忆引擎基础 | 未开始 |

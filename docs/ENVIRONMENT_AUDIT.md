@@ -38,8 +38,12 @@
 ### 1.2 网络
 
 - 环境变量中配置了本地代理（`127.0.0.1:7897`，HTTP/HTTPS/SOCKS）。
-- `git@github.com:...`（SSH 22 端口）**连接超时**。
 - `https://github.com/Freizy231/PersonalHub.git` **可达**，远端仓库当前无任何分支（空仓库）。
+- SSH：`github.com:22` 与 `ssh.github.com:443` 均已验证可达；`git@github.com` 公钥认证成功
+  （`Hi Freizy231! You've successfully authenticated`）。首次探测的超时是代理尚未就绪所致，
+  复测后正常。远端推送采用 SSH。
+- 本机 SSH 密钥：`~/.ssh/id_ed25519`（ED25519，指纹 `SHA256:5ooJLkd6WeKDNxibKAqYLhkaYqhyJHZapftQ4yQ+eiU`），
+  已在 GitHub 登记。无私钥外泄。
 
 ---
 
@@ -63,43 +67,32 @@
 
 ## 3. 已有资产（仓库外）
 
-发现一个仓库外的既有产物，**未被本仓库引用，本次也未修改**：
+发现一个仓库外的既有产物，**与本项目无关，已按用户确认排除**：
 
 ```text
 /home/freizy/personal-hub-backups/20261118T022135Z/   108M
-├── source-v0.14.2.tar.gz     619K   上一次实现的源码快照
-└── data/                     内含真实用户数据
+├── source-v0.14.2.tar.gz     619K   历史开发版本源码
+└── data/                     内含该历史版本的本地数据
     ├── database.sqlite3      27M
     ├── vault/vault.phv       加密私密库
     ├── notes/ library/ hub-files.json manifest.json
 ```
 
-`data/` 是**真实个人数据**（笔记、资料库、加密私密库等），位于仓库之外，符合 `AGENT.md` 关于数据目录的规定。本次仅确认存在性与大小，未读取正文内容。
+### 3.1 结论（用户已确认）
 
-### 3.1 既有源码的技术栈（只读检查归档清单）
+v0.14.2 是**之前的独立开发版本，与本产品无关联**。本项目不导入、不复用、不迁移其代码或数据；
+技术选型以 `AGENT.md` 为准，前端使用 **React + TypeScript + Vite**。
 
-- 版本：`0.14.2`，`requires-python >=3.11,<3.13`
-- 后端：FastAPI + SQLAlchemy 2.0 + Alembic + SQLite + Pydantic 2，模块化单体，Uvicorn
-- 前端：**Vue 3 + TypeScript + Vite + Naive UI**
-- 已有 12 份 ADR、多份 API 文档、HANDOFF 交接文档、升级迁移体系
+该目录保持原样、未被本仓库引用。它不属于本项目的用户数据，本项目也不得读取或改写它。
 
 ---
 
-## 4. 与规范基线的差距与冲突
+## 4. 与规范基线的差距
 
-### 4.1 冲突（需用户决策，不擅自改变）
+### 4.1 技术选型（已确认）
 
-| 项 | `AGENT.md` 基线 | 既有实现 v0.14.2 |
-|---|---|---|
-| 前端框架 | **React + TypeScript + Vite**（§3.1、§3.2） | **Vue 3** + Naive UI |
-| 起点 | 按里程碑 M0→M7 渐进构建 | 功能已远超 MVP（任务、日程、笔记、饮食、资料库…） |
-
-这是唯一影响 M1 的技术选型冲突。两种路线：
-
-- **路线 A：按规范重做**（React）。符合 `AGENT.md` 基线，但需重新实现已有功能，工作量大。
-- **路线 B：复用既有实现**（Vue 3）。工作量小、已有真实数据与迁移体系，但需先修改 `AGENT.md` 的前端基线，属于架构变更，须走 §13.2 的确认流程。
-
-在用户明确决策前，**不实施任何前端代码**。
+无冲突。用户已确认前端使用 **React + TypeScript + Vite**，与 `AGENT.md` §3.1、§3.2 基线一致。
+v0.14.2 历史版本与本项目无关，不作为参考实现。
 
 ### 4.2 环境差距
 
@@ -107,16 +100,18 @@
 |---|---|---|---|
 | `python3` = 3.7 | EOL 版本在 PATH 首位 | 直接建虚拟环境会失败 | 统一用 `uv` 并锁定 `--python 3.12`（或 3.11.9，若决定复用既有实现） |
 | SQLite CLI 3.24 | 过旧 | 命令行排障能力受限；不影响应用（应用用 Python 内置 3.45.1） | 暂不处理，不安装系统包 |
-| SSH 访问 GitHub 超时 | 22 端口被代理阻断 | 无法用 SSH 推送 | 推送到远端时改用 HTTPS + PAT，或后续单独配置 SSH over 443 |
-| 远端仓库为空 | 无分支 | 首次推送需 `-u origin main` | 用户授权后再推送 |
+| 远端仓库为空 | 无分支 | 首次推送需 `-u origin main` | 已用 SSH 推送 `main`，见第 8 节 |
+
+SSH 通路问题已排除：`github.com:22` 直连可用，无需 HTTPS + PAT 或 443 端口变通方案。
 
 ---
 
 ## 5. 数据保护风险
 
-1. 真实用户数据仅存在于 `/home/freizy/personal-hub-backups/20261118T022135Z/data/`，**只有一份**。在任何复用/迁移动作前，必须先确认该备份完整性，并保留原样。
-2. 既有源码包内的 `database.sqlite3` 是活跃 SQLite 数据，不可直接用文件复制方式备份；应按 §4.13 使用一致性备份机制。
-3. 本仓库 `.gitignore` 已覆盖 `.env`、`.venv`、`*.db`、`*.sqlite*`、`data/`、`vault/`、`logs/`、`node_modules/`、`dist/`，并已用 `git check-ignore` 逐条验证通过。
+1. 仓库外 `/home/freizy/personal-hub-backups/` 属于历史版本，与本项目无关；本项目不读取、不迁移、不覆盖它。
+2. 本项目自身的用户数据将存放在操作系统标准应用数据目录（§5.3），**不在源码仓库内**。
+3. SQLite 数据不可用文件复制方式备份；应按 §4.13 使用一致性备份机制（M2 起需要）。
+4. 本仓库 `.gitignore` 已覆盖 `.env`、`.venv`、`*.db`、`*.sqlite*`、`data/`、`vault/`、`logs/`、`node_modules/`、`dist/`，并已用 `git check-ignore` 逐条验证通过。
 
 ---
 
@@ -132,12 +127,21 @@
 
 ---
 
-## 7. M1 最小任务清单（待前端决策后执行）
+## 6. M1 技术基线（已确认）
 
-1. 用 `uv` 创建后端虚拟环境，锁定 Python 版本，生成 `pyproject.toml` / 锁文件。
+| 层 | 选型 | 版本要求 |
+|---|---|---|
+| 后端 | Python + FastAPI + Pydantic + SQLAlchemy + SQLite + Alembic | Python 3.12（`uv` 管理） |
+| 前端 | React + TypeScript + Vite | Node 22.12+ |
+| 测试 | Pytest（后端） | — |
+| 远程 | SSH（`git@github.com:Freizy231/PersonalHub.git`） | — |
+
+## 7. M1 最小任务清单
+
+1. 用 `uv` 创建后端虚拟环境，锁定 Python 3.12，生成 `pyproject.toml` 与锁文件。
 2. 建立 `backend/app/main.py`，只实现 `GET /api/v1/health`，返回版本与状态，不连数据库。
 3. 为 `/api/v1/health` 写 Pytest 测试（正常路径 + 统一错误结构）。
-4. 建立前端骨架（框架取决于第 4.1 节决策），首页请求健康检查并显示连接状态。
+4. 用 Vite 创建 `frontend/`（React + TypeScript），首页请求健康检查并显示连接状态。
 5. 启动绑定 `127.0.0.1`，配置严格的 CORS 白名单，不使用 `0.0.0.0`。
 6. 更新 `README.md`：可重复的安装与启动步骤。
 
@@ -155,8 +159,16 @@ cd frontend && npm ci && npm run dev
 
 ---
 
-## 8. 待用户决策
+## 8. 决策记录
 
-1. 前端基线：React（遵循现有规范）还是 Vue 3（复用既有实现并修改规范）？
-2. 是否将既有 v0.14.2 源码作为参考资产纳入本仓库（只读参考，还是作为新起点）？
-3. 何时、以何种方式推送首个提交到 GitHub 远端？
+已在 2026-11-23 由用户确认：
+
+1. **前端基线：React + TypeScript + Vite**，与 `AGENT.md` 一致。
+2. **v0.14.2 与本产品无关联**，不导入、不复用、不迁移其代码或数据。
+3. **远程推送使用 SSH**（已验证 `git@github.com` 公钥认证成功）。
+
+## 9. M0 结论
+
+- 仓库与环境适合按 `AGENT.md` 基线从头构建 MVP。
+- 技术选型无冲突，M1 可以直接开始。
+- 唯一需要长期注意的环境陷阱是 `PATH` 上的 `python3` 为 3.7；一律通过 `uv --python 3.12` 管理。
