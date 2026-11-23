@@ -4,7 +4,7 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 
 ## 当前状态
 
-项目处于 **M3 前的过渡点**：M2（SQLite 持久化）已完成，会话与消息可持久化读写。已确认技术选型：后端 Python + FastAPI，
+项目处于 **M3（AI Workspace）已完成**：可与会话进行流式对话，数据本地持久化。已确认技术选型：后端 Python + FastAPI，
 前端 **React + TypeScript + Vite**。
 
 > 历史版本 v0.14.2 与本项目无关联，不作为参考实现，其源码与数据不导入本项目。
@@ -30,6 +30,28 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - 会话详情支持 Enter 发送、Shift+Enter 换行、多行缩进保留、中文输入法组合保护
 - 数据库位于 `~/.local/share/personal-hub/db/`，不在源码仓库内
 
+### 已完成（M3）
+
+- DeepSeek 流式对话：`POST /api/v1/chat/stream`（SSE）
+- 前端逐字渲染、停止生成、输入法组合保护
+- 外发审计日志（只记元数据，不记正文）
+- 取消生成时不保存部分回复
+
+### 配置
+
+模型需要 API Key，**只在后端设置**，绝不要写进前端：
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+# 可选
+export PH_MODEL="deepseek-chat"
+export PH_PROVIDER_BASE_URL="https://api.deepseek.com"
+./scripts/dev.sh
+```
+
+未设置 Key 时，对话接口返回明确的配置错误，其余功能正常。
+与规范的偏离（未做外发检查层、未用 Keychain）见 [`docs/DECISIONS.md`](docs/DECISIONS.md)。
+
 数据库操作与迁移流程见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)。
 
 - 主规范：[`AGENT.md`](AGENT.md)（权威项目上下文、架构、里程碑与验收标准）
@@ -44,7 +66,7 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 | M0 | 仓库与环境审计 | 已完成 |
 | M1 | 前后端骨架 + 健康检查 | 已完成 |
 | M2 | SQLite 持久化 | 已完成 |
-| M3 | AI Workspace（接入模型） | 未开始 |
+| M3 | AI Workspace（接入模型） | 已完成 |
 | M4 | 记忆引擎基础 | 未开始 |
 | M5 | Agent Loop 与只读工具 | 未开始 |
 | M6 | 权限与审批 | 未开始 |
@@ -91,8 +113,8 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（101 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
-# workspace 隔离、role 伪造防护、级联删除、迁移副作用）
+# 后端测试（143 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# workspace 隔离、role 伪造防护、级联删除、流式对话、取消语义、外发审计、代理处理）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -39,6 +39,23 @@ def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", "unknown")
 
 
+class PublicMessageError(HTTPException):
+    """带**经审核安全文案**的 HTTP 错误。
+
+    普通 HTTPException 的 detail 一律被丢弃，只映射为通用文案，避免把内部
+    细节（SQL、路径、供应商原文）泄漏出去。但有些错误本来就是要给用户看的，
+    例如"未配置 DEEPSEEK_API_KEY" —— 用户只有知道这条信息才能修好配置。
+
+    使用约束：message 必须是**研发预先写死**的固定文案，
+    绝不能拼接用户输入、异常正文、文件路径或供应商原始响应。
+    """
+
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        super().__init__(status_code=status_code, detail=message)
+        self.public_code = code
+        self.public_message = message
+
+
 def _http_status_code(exc: StarletteHTTPException) -> tuple[str, str]:
     """把 HTTP 状态码映射为稳定的机器码。
 
@@ -54,6 +71,7 @@ def _http_status_code(exc: StarletteHTTPException) -> tuple[str, str]:
         413: ("PAYLOAD_TOO_LARGE", "请求内容过大。"),
         415: ("UNSUPPORTED_MEDIA_TYPE", "不支持的请求内容类型。"),
         429: ("RATE_LIMITED", "请求过于频繁，请稍后再试。"),
+        503: ("SERVICE_UNAVAILABLE", "服务暂不可用。"),
     }
     return mapping.get(exc.status_code, ("HTTP_ERROR", "请求处理失败。"))
 
@@ -61,8 +79,15 @@ def _http_status_code(exc: StarletteHTTPException) -> tuple[str, str]:
 def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        if isinstance(exc, PublicMessageError):
+            # 仅这类异常允许把预先写死的安全文案透传给用户。
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=error_body(exc.public_code, exc.public_message, _request_id(request)),
+            )
+
         code, message = _http_status_code(exc)
-        # 404 等常见错误保持默认提示，其余状态码使用上面的安全文案。
+        # 其余状态码一律使用映射后的通用文案，绝不透传 detail。
         return JSONResponse(
             status_code=exc.status_code,
             content=error_body(code, message, _request_id(request)),

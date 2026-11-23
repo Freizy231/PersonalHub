@@ -4,6 +4,7 @@ const MAX_LENGTH = 100_000
 
 interface MessageComposerProps {
   onSend: (content: string) => Promise<boolean>
+  onCancel: () => void
   sending: boolean
 }
 
@@ -14,7 +15,7 @@ interface MessageComposerProps {
  * 输入法组合期间（输入中文拼音时）按 Enter 只是选词，不能触发发送——
  * 用 isComposing 判断，否则中文用户每选一个词就会误发。
  */
-export function MessageComposer({ onSend, sending }: MessageComposerProps) {
+export function MessageComposer({ onSend, onCancel, sending }: MessageComposerProps) {
   const [content, setContent] = useState('')
 
   const trimmed = content.trim()
@@ -54,10 +55,18 @@ export function MessageComposer({ onSend, sending }: MessageComposerProps) {
         disabled={sending}
       />
       <div className="composer__actions">
-        <span className="composer__hint">{trimmed.length.toLocaleString()} 字符</span>
-        <button type="submit" disabled={!canSend}>
-          {sending ? '发送中…' : '发送'}
-        </button>
+        <span className="composer__hint">
+          {sending ? '生成中…' : `${trimmed.length.toLocaleString()} 字符`}
+        </span>
+        {sending ? (
+          <button type="button" className="danger" onClick={onCancel}>
+            停止生成
+          </button>
+        ) : (
+          <button type="submit" disabled={!canSend}>
+            发送
+          </button>
+        )}
       </div>
     </form>
   )

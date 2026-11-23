@@ -78,6 +78,14 @@ class Settings:
     # 避免 Settings() 与 Settings.from_env() 对同一环境变量给出不同结果。
     data_dir: Path = field(default_factory=lambda: _env_path("PH_DATA_DIR", default_data_dir()))
 
+    # 模型配置。API Key 刻意不放在这里：Settings 会被打日志、序列化、跨进程传递，
+    # 密钥一旦进入配置对象就很容易泄漏。Key 只在需要时从环境变量直接读取（见 app/ai）。
+    provider: str = field(default_factory=lambda: _env_str("PH_PROVIDER", "deepseek"))
+    model: str = field(default_factory=lambda: _env_str("PH_MODEL", "deepseek-chat"))
+    provider_base_url: str = field(
+        default_factory=lambda: _env_str("PH_PROVIDER_BASE_URL", "https://api.deepseek.com")
+    )
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "db" / "personal-hub.db"
@@ -89,6 +97,9 @@ class Settings:
             port=_env_int("PH_PORT", 8000),
             allowed_origins=_env_list("PH_ALLOWED_ORIGINS", DEFAULT_DEV_ORIGINS),
             data_dir=_env_path("PH_DATA_DIR", default_data_dir()),
+            provider=_env_str("PH_PROVIDER", "deepseek"),
+            model=_env_str("PH_MODEL", "deepseek-chat"),
+            provider_base_url=_env_str("PH_PROVIDER_BASE_URL", "https://api.deepseek.com"),
         )
 
 

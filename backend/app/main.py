@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import conversations, health, messages
+from app.api import chat, conversations, health, messages
 from app.core.config import Settings, get_settings
 from app.core.errors import install_exception_handlers
 from app.core.logging import configure_logging
@@ -63,6 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, prefix=settings.api_prefix)
     app.include_router(conversations.router, prefix=settings.api_prefix)
     app.include_router(messages.router, prefix=settings.api_prefix)
+    app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app
 

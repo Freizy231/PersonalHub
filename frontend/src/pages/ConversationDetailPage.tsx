@@ -8,13 +8,14 @@ import { useConversationDetail } from '../hooks/useConversationDetail'
 /** 会话详情：消息列表 + 输入框。 */
 export function ConversationDetailPage() {
   const { conversationId = '' } = useParams()
-  const { state, sending, sendError, send, reload } = useConversationDetail(conversationId)
+  const { state, streamingText, sending, sendError, send, cancel, reload } =
+    useConversationDetail(conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // 新消息到达时滚到底部，否则用户看不到刚发的消息。
+  // 新消息或流式文本增长时滚到底部，否则用户看不到最新内容。
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
-  }, [state.messages.length])
+  }, [state.messages.length, streamingText])
 
   if (state.notFound) {
     return (
@@ -56,7 +57,7 @@ export function ConversationDetailPage() {
       {state.loading && state.messages.length === 0 ? (
         <p className="messages__empty">正在加载消息…</p>
       ) : (
-        <MessageList messages={state.messages} />
+        <MessageList messages={state.messages} streamingText={streamingText} />
       )}
 
       <div ref={bottomRef} />
@@ -67,7 +68,7 @@ export function ConversationDetailPage() {
         </div>
       )}
 
-      <MessageComposer onSend={send} sending={sending} />
+      <MessageComposer onSend={send} onCancel={cancel} sending={sending} />
     </section>
   )
 }

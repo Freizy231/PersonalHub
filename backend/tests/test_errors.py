@@ -106,3 +106,49 @@ class TestInternalError:
         assert payload["request_id"] == "abc123"
         assert payload["message"] == "未处理异常"
         assert "timestamp" in payload
+
+
+class TestPublicMessageError:
+    """PublicMessageError 是唯一允许外露 detail 的通道，必须防止滥用。"""
+
+    def test_public_message_is_forwarded(self, tmp_path: Path) -> None:
+        from fastapi import APIRouter
+
+        from app.core.config import Settings
+        from app.core.errors import PublicMessageError
+
+        app = create_app(Settings(data_dir=tmp_path / "pub"))
+        router = APIRouter()
+
+        @router.get("/needs-config")
+        async def needs_config() -> None:
+            raise PublicMessageError(503, "PROVIDER_NOT_CONFIGURED", "请设置 DEEPSEEK_API_KEY。")
+
+        app.include_router(router, prefix="/api/v1")
+        with TestClient(app) as client:
+            response = client.get("/api/v1/needs-config")
+
+        assert response.status_code == 503
+        body = response.json()["error"]
+        assert body["code"] == "PROVIDER_NOT_CONFIGURED"
+        assert body["message"] == "请设置 DEEPSEEK_API_KEY。"
+
+    def test_plain_http_exception_detail_still_hidden(self, tmp_path: Path) -> None:
+        """普通 HTTPException 的 detail 必须继续被丢弃。"""
+        from fastapi import APIRouter, HTTPException
+
+        from app.core.config import Settings
+
+        app = create_app(Settings(data_dir=tmp_path / "plain"))
+        router = APIRouter()
+
+        @router.get("/leak")
+        async def leak() -> None:
+            raise HTTPException(500, detail="secret internals /home/user/db.sqlite")
+
+        app.include_router(router, prefix="/api/v1")
+        with TestClient(app) as client:
+            response = client.get("/api/v1/leak")
+
+        assert "secret internals" not in response.text
+        assert "/home/user" not in response.text

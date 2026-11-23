@@ -608,3 +608,32 @@ a.button:hover {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- 流式生成（M3） ---------- */
+
+.message--streaming .message__content {
+  /* 流式文本可能持续增长，确保气泡不会突然跳高度太多 */
+  min-height: 1.5em;
+}
+
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}

@@ -53,7 +53,28 @@
 - [ ] 前端尚无单元测试
 - [ ] 消息分页为一次性加载 200 条，长对话需要游标分页
 
-### M3 — AI Workspace — 未开始
+### M3 — AI Workspace — 已完成
+
+已完成：
+- [x] DeepSeek Provider Adapter（httpx 实现，无官方 SDK 依赖）
+- [x] `POST /api/v1/chat/stream`：SSE 流式输出、历史上下文传递
+- [x] 取消语义：客户端断开 → 审计 `aborted` → 不保存部分回复
+- [x] 外发审计日志（仅元数据：供应商/模型/条数/字符数/结果，不含正文）
+- [x] 错误映射：鉴权/余额/限流/服务不可用/超时/不可达，面向用户文案固定安全
+- [x] API Key 仅存于后端环境变量，前端与日志中均验证不出现
+- [x] 前端流式渲染：逐字显示、光标动画、停止生成按钮、乐观显示用户消息
+- [x] SSE 帧解析（自定义 fetch 流读取，非 EventSource）
+- [x] 代理处理：socks 代理不崩溃、回环地址不走代理
+- [x] 后端 143 项测试
+
+规范偏离（详见 `docs/DECISIONS.md`）：
+- [ ] D-002 未实现 Data Egress 检查层（用户决定）
+- [ ] D-003 未使用 OS Keychain（本机无方案，用环境变量）
+
+技术债：
+- [ ] 历史按条数截断（40 条），无 token 预算管理 —— 留给 M4 Context Engine
+- [ ] 无模型选择 UI，模型由服务端配置固定
+- [ ] 未做真实 DeepSeek API 的端到端验证（需真实 Key，由用户手动完成）
 
 ### M4 — Memory Engine Basic — 未开始
 
