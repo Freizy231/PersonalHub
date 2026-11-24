@@ -4,7 +4,7 @@
 
 ## 阶段 A：Personal Hub MVP（M0–M7）
 
-### M0 — Repository & Environment Audit — 进行中
+### M0 — Repository & Environment Audit — 已完成
 
 已完成：
 - [x] 读取 `AGENT.md` / `AGENTS.md`，确认当前里程碑
@@ -18,7 +18,7 @@
 - [x] 确认 v0.14.2 历史版本与本项目无关，不复用
 - [x] SSH 到 GitHub 认证验证成功
 
-### M1 — Frontend/Backend Skeleton — 进行中
+### M1 — Frontend/Backend Skeleton — 已完成
 
 已完成：
 - [x] 后端 `uv` 环境（Python 3.12.3，`uv.lock` 锁定 FastAPI 0.165.0 / Pydantic 2.14.4）
@@ -247,7 +247,7 @@ M7 未交付（理由）：
 
 ## 阶段 B：Personal Hub Platform（M8）
 
-### M8 — Capability Runtime — 进行中
+### M8 — Capability Runtime — 已完成
 
 已完成（第一阶段：地基，2026-11-24）：
 - [x] 统一 `CapabilityManifest` Schema（§7.2 全部字段：id/name/version/type/
@@ -363,7 +363,7 @@ M7 未交付（理由）：
 
 ## 阶段 C：Personal Hub System Builder（M9）
 
-### M9 — Natural-language Software Creation — 进行中
+### M9 — Natural-language Software Creation — 已完成
 
 提案：`docs/PROPOSAL_M9.md`（用户已批准）
 
