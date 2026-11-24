@@ -332,3 +332,75 @@ M7 按 §2.5/M7 交付了 `job_queue`（作业，有 PENDING/RUNNING/… 与取�
   或显式命名），避免与作业接口在同一路径空间下重逢。
 - `AGENT.md` 本身未修改：它仍是权威规范，本条是对其术语歧义的**项目级澄清**。
   如需从规范层面消除歧义，应另行提交规范修订并经用户确认。
+
+---
+
+## D-014：M8 第一阶段——统一 Capability Manifest 与能力注册表
+
+- 日期：2026-11-24
+- 状态：已实施（用户要求开始阶段 B）
+- 规范条款：§4.9 Capability Registry、§7.2 Capability Manifest、M8 交付 1–2
+
+**范围**：只做 M8 的第 1、2 项（统一 Manifest Schema、Registry 注册/检索/版本）。
+第 3–8 项（Skills、MCP Client、Process Plugin、安装管理、WASM）尚未开始。
+按"只推进一个可验收子任务"的原则，先把所有后续能力都要依赖的地基做对。
+
+**关键设计**：
+
+1. **两套注册表刻意分开**
+
+   | 注册表 | 内容 | 是否可对外 |
+   |---|---|---|
+   | `ToolRegistry` | `name -> ToolDefinition`，**含 handler** | 否 |
+   | `CapabilityRegistry` | `id + version -> CapabilityManifest` | 是（只读 API） |
+
+   Manifest 是"描述数据"，不含任何可执行内容，因此可以安全地导出、
+   展示、将来打进安装包。若两者合一，"查看能力"就等于暴露 handler。
+
+2. **声明不等于授权**（§7.2 的硬约束）
+
+   Manifest 上的 `permissions` 只是字符串声明，不参与 `Policy Engine` 决策。
+   有专门测试 `test_permissions_are_declared_not_granted` 锁定这条边界：
+   即使 Manifest 声称有写权限，Policy 仍要求审批。
+
+3. **版本按数字比较**
+
+   不能让 "1.10.0" 排在 "1.9.0" 之前（字符串比较的经典陷阱）。
+   `version_key()` 转成整数元组；带预发布后缀的排在正式版之前。
+
+4. **依赖不阻断登记**
+
+   能力可以任意顺序安装。"缺少依赖"由 `missing_dependencies()` 单独报告，
+   "依赖环"由 `check_dependency_cycle()` 报告，界面据此提示用户，
+   而不是在调用时才失败。仍有其他能力依赖时拒绝卸载。
+
+5. **Manifest 来自外部时按不可信输入处理**（§8.4）
+
+   `from_dict()` 拒绝未知字段（静默忽略会让拼错的字段看起来生效了）、
+   校验枚举取值、校验 id 与版本格式。
+
+6. **只读 API，不含安装与调用**
+
+   `GET /capabilities`、`/capabilities/{id}`、`/{id}/versions`、`/health/deps`。
+   M8 第 6–7 项（安装、启用、卸载）需要独立的授权流程（§8.5），
+   不和"查看"一起交付。
+
+**过程中修正的实现缺陷**：
+
+- `dataclass` 不会自动把字符串转成枚举，`to_dict()` 会因 `.value` 崩溃。
+  在 `__post_init__` 里规范化，并把列表统一成元组。
+- 普通 `HTTPException` 的 detail 会被统一错误处理丢弃（只映射成
+  "请求处理失败。"），用户无从知道合法的类型取值。改用 `PublicMessageError`
+  透出**本模块写死**的可选值列表。
+- `from_dict` 原先把 `runtime` / `source` 当必填，导致内建能力也要写样板字段。
+  改为只有 `type` 必填，其余用默认值。
+
+**未做（明确记录）**：
+
+- `output_schema` 目前只有描述性占位，内建工具尚无稳定的输出契约。
+- 能力只存在于内存，服务重启后从内建工具重新生成；
+  尚未落库（安装的第三方能力将来需要持久化，见 M8 第 7 项）。
+
+**回滚**：新增文件与一个只读路由，无数据库迁移；
+回滚即删除 `app/capabilities/manifest.py`、`registry.py`、`app/api/capabilities.py`、
+`tests/test_capabilities.py` 并移除 `main.py` 中的三行接线。

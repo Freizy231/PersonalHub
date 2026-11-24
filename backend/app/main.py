@@ -15,8 +15,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 
-from app.api import approvals, chat, conversations, health, jobs, memory, messages
+from app.api import approvals, capabilities, chat, conversations, health, jobs, memory, messages
 from app.capabilities import ToolRegistry
+from app.capabilities.registry import CapabilityRegistry, manifest_from_tool
 from app.capabilities.tools import register_builtin_tools
 from app.core.config import Settings, get_settings
 from app.core.errors import install_exception_handlers
@@ -109,6 +110,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_builtin_tools(tool_registry, app.state.session_factory)
     app.state.tool_registry = tool_registry
 
+    # 能力注册表（M8）：存放可检索、可展示的 Manifest 描述。
+    # 与 tool_registry 分开：前者是**描述**（可导出、可给用户看），
+    # 后者是**运行时对象**（含 handler，绝不出现在 API 响应里）。
+    capability_registry = CapabilityRegistry()
+    for definition in tool_registry.all():
+        capability_registry.register(manifest_from_tool(definition))
+    app.state.capability_registry = capability_registry
+
     # 会话级授权（"本次会话内不再询问"）。刻意放在内存：
     # 刷新页面/重启服务即失效，避免一次勾选变成永久放行（D-010）。
     from app.policy.grants import SessionGrants
@@ -137,6 +146,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(memory.router, prefix=settings.api_prefix)
     app.include_router(approvals.router, prefix=settings.api_prefix)
     app.include_router(jobs.router, prefix=settings.api_prefix)
+    app.include_router(capabilities.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app

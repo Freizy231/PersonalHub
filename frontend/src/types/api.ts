@@ -184,3 +184,35 @@ export interface ActivityList {
   items: TaskEventItem[]
   total: number
 }
+
+/** 能力声明（M8）。字段与后端 CapabilityOut 对应。
+ *
+ * 注意：permissions 只是**声明**，不代表已获授权（见 docs/DECISIONS.md D-014）。
+ */
+export interface Capability {
+  id: string
+  name: string
+  version: string
+  type: string
+  description: string
+  input_schema: Record<string, unknown>
+  output_schema: Record<string, unknown>
+  runtime: string
+  permissions: string[]
+  dependencies: string[]
+  compatibility: string
+  source: string
+  signature: string | null
+}
+
+export interface CapabilityList {
+  items: Capability[]
+  total: number
+  notice: string
+}
+
+export interface DependencyHealth {
+  missing: Record<string, string[]>
+  cycle: string[]
+  healthy: boolean
+}

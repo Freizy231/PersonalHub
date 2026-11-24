@@ -1,6 +1,7 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 
 import { ActivityCenterPage } from './pages/ActivityCenterPage'
+import { CapabilityCenterPage } from './pages/CapabilityCenterPage'
 import { ConversationDetailPage } from './pages/ConversationDetailPage'
 import { ConversationsPage } from './pages/ConversationsPage'
 import { HomePage } from './pages/HomePage'
@@ -14,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/memory', label: '记忆', end: false },
   { to: '/tasks', label: '任务', end: false },
   { to: '/activity', label: '活动', end: false },
+  { to: '/capabilities', label: '能力', end: false },
 ]
 
 export default function App() {
@@ -52,6 +54,7 @@ export default function App() {
           <Route path="/tasks/failed" element={<TaskCenterPage filter="FAILED" />} />
           <Route path="/activity" element={<ActivityCenterPage />} />
           <Route path="/activity/:jobId" element={<ActivityCenterPage />} />
+          <Route path="/capabilities" element={<CapabilityCenterPage />} />
           <Route
             path="*"
             element={
@@ -67,7 +70,7 @@ export default function App() {
 
         <footer className="app__footer">
           <p>
-            当前处于 <strong>M7 — 持久化任务运行时</strong> 阶段（MVP 全部里程碑已完成）。
+            当前处于 <strong>M8 — 能力运行时</strong> 阶段（已交付 Manifest 与能力注册表）。
           </p>
           <p>数据默认留在本机，服务只监听回环地址。</p>
         </footer>

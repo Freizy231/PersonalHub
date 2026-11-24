@@ -245,8 +245,47 @@ M7 未交付（理由）：
 即可闭合，无需改表。
 
 
-## 阶段 B–D
+## 阶段 B：Personal Hub Platform（M8）
 
-- M8 Capability Runtime — 未开始
+### M8 — Capability Runtime — 进行中
+
+已完成（第一阶段：地基，2026-11-24）：
+- [x] 统一 `CapabilityManifest` Schema（§7.2 全部字段：id/name/version/type/
+      description/input_schema/output_schema/runtime/permissions/dependencies/
+      compatibility/source/signature）
+- [x] 不可信输入校验：拒绝未知字段、校验枚举/版本/id 格式，错误可读
+- [x] `CapabilityRegistry`：登记、按 id 取最高版本、按版本取、列全部版本
+- [x] 语义化版本按数字比较（1.10.0 > 1.9.0），预发布排在正式版之前
+- [x] 重复登记同一版本被拒（可显式 `replace=True` 覆盖）
+- [x] 依赖报告：`missing_dependencies()` 与 `check_dependency_cycle()`
+- [x] 有依赖者时拒绝卸载
+- [x] 检索：按关键词（id/名称）+ 类型 + 来源筛选
+- [x] 内建工具自动投影为 Manifest（`builtin.<tool>`）
+- [x] 只读 API：`GET /capabilities`、`/capabilities/{id}`、`/{id}/versions`、
+      `/capabilities/health/deps`
+- [x] 前端「能力」页：列表、搜索、按类型筛选、参数结构折叠、依赖健康提示
+- [x] 后端 435 项测试（本阶段新增 56 项）
+
+安全边界（已用测试锁定）：
+- [x] Manifest **不含 handler**，API 响应中不可能出现可执行内容
+- [x] `permissions` 只是声明，不参与 Policy 决策；
+      写操作仍然要求用户审批（`test_permissions_are_declared_not_granted`）
+- [x] 不提供安装 / 启用 / 卸载 / 调用接口（留到第 6–7 项，需独立授权流程）
+
+未开始：
+- [ ] 3. Skills 加载（内容与指令，不默认执行代码）
+- [ ] 4. MCP Client 连接测试 Server
+- [ ] 5. Tool Broker 代理 MCP 调用
+- [ ] 6. 独立低权限 Process Plugin
+- [ ] 7. 插件安装 / 禁用 / 卸载 / 版本管理
+- [ ] 8. 评估 WASM Runtime
+
+技术债：
+- [ ] `output_schema` 仅为描述性占位，内建工具尚无稳定输出契约
+- [ ] 能力只存在于内存，重启后从内建工具重建；第三方能力将来需要落库
+
+
+## 阶段 C–D
+
 - M9 System Builder — 未开始
 - M10 Sync & Community — 未开始

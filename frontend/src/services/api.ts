@@ -13,8 +13,11 @@ import type {
   ApiErrorBody,
   Approval,
   ApprovalList,
+  Capability,
+  CapabilityList,
   Conversation,
   ConversationList,
+  DependencyHealth,
   HealthResponse,
   Job,
   JobDetail,
@@ -188,6 +191,25 @@ export const api = {
 
   activity: {
     list: (limit = 50) => request<ActivityList>(`/activity?limit=${limit}`),
+  },
+
+  /** 能力声明（M8）。只读：安装与调用需要单独的授权流程，不在此暴露。 */
+  capabilities: {
+    list: (options: { q?: string; type?: string; source?: string } = {}) => {
+      const params = new URLSearchParams()
+      if (options.q) params.set('q', options.q)
+      if (options.type) params.set('type', options.type)
+      if (options.source) params.set('source', options.source)
+      const qs = params.toString()
+      return request<CapabilityList>(`/capabilities${qs ? `?${qs}` : ''}`)
+    },
+
+    get: (id: string) => request<Capability>(`/capabilities/${encodeURIComponent(id)}`),
+
+    versions: (id: string) =>
+      request<CapabilityList>(`/capabilities/${encodeURIComponent(id)}/versions`),
+
+    dependencyHealth: () => request<DependencyHealth>('/capabilities/health/deps'),
   },
 
   approvals: {
