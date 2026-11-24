@@ -570,6 +570,173 @@ a.button:hover {
   font-size: 0.94rem;
 }
 
+.message__content--pending {
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+/* 本轮实时内容（工具活动 + 审批卡片）位于消息流末尾。
+   它本身不是一条消息，所以去掉气泡外观，只保留内部块样式。 */
+.messages__live {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---------- Markdown 渲染（D-012） ---------- */
+
+.message__content--markdown {
+  white-space: normal;
+  font-size: 0.94rem;
+  line-height: 1.7;
+}
+
+.message__content--markdown > :first-child {
+  margin-top: 0;
+}
+
+.message__content--markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.message__content--markdown h1,
+.message__content--markdown h2,
+.message__content--markdown h3,
+.message__content--markdown h4 {
+  margin: 1.1em 0 0.5em;
+  line-height: 1.35;
+  font-weight: 650;
+}
+
+.message__content--markdown h1 {
+  font-size: 1.3em;
+}
+
+.message__content--markdown h2 {
+  font-size: 1.16em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+
+.message__content--markdown h3 {
+  font-size: 1.04em;
+}
+
+.message__content--markdown h4 {
+  font-size: 0.98em;
+  color: var(--text-muted);
+}
+
+.message__content--markdown p {
+  margin: 0.65em 0;
+}
+
+.message__content--markdown ul,
+.message__content--markdown ol {
+  margin: 0.6em 0;
+  padding-left: 1.5em;
+}
+
+.message__content--markdown li {
+  margin: 0.25em 0;
+}
+
+.message__content--markdown li > p {
+  margin: 0.2em 0;
+}
+
+.message__content--markdown blockquote {
+  margin: 0.7em 0;
+  padding: 0.35em 0 0.35em 0.9em;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text-muted);
+}
+
+.message__content--markdown blockquote p {
+  margin: 0.3em 0;
+}
+
+.message__content--markdown hr {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.message__content--markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.message__content--markdown a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.message__content--markdown strong {
+  font-weight: 650;
+}
+
+.message__content--markdown code {
+  /* 行内代码。与全局 code 样式一致，但补上换行保护。 */
+  overflow-wrap: anywhere;
+}
+
+.message__content--markdown pre {
+  margin: 0.7em 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  line-height: 1.55;
+}
+
+.message__content--markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.86em;
+  white-space: pre;
+}
+
+/* 表格：模型很常用。窄屏允许横向滚动，而不是把页面撑破。 */
+.message__content--markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0.8em 0;
+  border-collapse: collapse;
+  font-size: 0.88em;
+  overflow-x: auto;
+}
+
+.message__content--markdown th,
+.message__content--markdown td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.message__content--markdown th {
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.message__content--markdown tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--border) 12%, transparent);
+}
+
+.message__content--markdown img {
+  max-width: 100%;
+}
+
+.md-image-link {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
 /* ---------- 输入框 ---------- */
 
 .composer {
@@ -609,10 +776,19 @@ a.button:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.composer__hint--error {
+  color: var(--err);
+}
+
 /* ---------- 流式生成（M3） ---------- */
 
 .message--streaming .message__content {
   /* 流式文本可能持续增长，确保气泡不会突然跳高度太多 */
+  min-height: 1.5em;
+}
+
+/* 流式气泡里的 Markdown 同样需要最小高度，且光标跟在正文后。 */
+.message--streaming .message__content--markdown {
   min-height: 1.5em;
 }
 
@@ -958,6 +1134,78 @@ a.button:hover {
 .approval-card__action {
   margin: 0 0 10px;
   font-size: 0.92rem;
+}
+
+.approval-card__timer {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.approval-card--expired {
+  opacity: 0.75;
+}
+
+.approval-card--expired .approval-card__dot {
+  background: var(--text-muted);
+  animation: none;
+}
+
+/* 人话摘要：逐项「标签：值」，不用等宽字体、不用 JSON（D-012）。 */
+.approval-card__summary {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.approval-card__field {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr);
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.approval-card__field + .approval-card__field {
+  border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  padding-top: 6px;
+  margin-top: 3px;
+}
+
+.approval-card__field dt {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.approval-card__field dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 原始参数折叠区：默认收起，需要核对时才展开。 */
+.approval-card__raw {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+}
+
+.approval-card__raw summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.approval-card__raw summary:hover {
+  color: var(--accent);
+}
+
+.approval-card__raw .approval-card__preview {
+  margin-top: 8px;
+  max-height: 14em;
+  overflow: auto;
 }
 
 .approval-card__preview {

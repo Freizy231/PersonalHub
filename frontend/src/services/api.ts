@@ -146,10 +146,17 @@ export const api = {
       request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
     messages: {
-      list: (conversationId: string, limit = 200, offset = 0) =>
+      /**
+       * 列出消息。
+       *
+       * order='desc' 表示"从最新一条往回取"，items 仍按时间正序返回。
+       * 会话详情页必须用它：固定 offset=0 只能看到最早的 200 条，
+       * 超长会话里最新的消息反而看不见（D-012）。
+       */
+      list: (conversationId: string, limit = 200, offset = 0, order: 'asc' | 'desc' = 'asc') =>
         request<MessageList>(
           `/conversations/${encodeURIComponent(conversationId)}/messages` +
-            `?limit=${limit}&offset=${offset}`,
+            `?limit=${limit}&offset=${offset}&order=${order}`,
         ),
 
       // 后端只接受 role="user"，这里也不发送 role，避免前端与后端契约漂移。

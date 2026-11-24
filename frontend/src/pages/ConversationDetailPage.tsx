@@ -7,6 +7,9 @@ import { MessageList } from '../components/MessageList'
 import { ToolActivityList } from '../components/ToolActivityList'
 import { useConversationDetail } from '../hooks/useConversationDetail'
 
+/** 距离底部多少像素以内算"正在看最新内容"，超过就不再自动跟随。 */
+const STICK_THRESHOLD_PX = 96
+
 /** 会话详情：消息列表 + 输入框。 */
 export function ConversationDetailPage() {
   const { conversationId = '' } = useParams()
@@ -16,6 +19,7 @@ export function ConversationDetailPage() {
     toolActivity,
     pendingApproval,
     decideApproval,
+    dismissApproval,
     deciding,
     sending,
     sendError,
@@ -24,11 +28,27 @@ export function ConversationDetailPage() {
     reload,
   } = useConversationDetail(conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
+  /** 用户是否贴着底部阅读。往上翻看历史时为 false，此时不要把人拽回底部。 */
+  const stickToBottom = useRef(true)
 
-  // 新消息或流式文本增长时滚到底部，否则用户看不到最新内容。
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' })
-  }, [state.messages.length, streamingText])
+    const onScroll = () => {
+      const distance =
+        document.documentElement.scrollHeight - window.scrollY - window.innerHeight
+      stickToBottom.current = distance <= STICK_THRESHOLD_PX
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // 新内容到达时滚到底部，但仅在用户本来就贴着底部时。
+  // 原件每次都强行滚动，用户往上翻看前文会被立刻拽回（D-012）。
+  useEffect(() => {
+    if (stickToBottom.current) {
+      bottomRef.current?.scrollIntoView({ block: 'end' })
+    }
+  }, [state.messages.length, streamingText, pendingApproval, toolActivity.length])
 
   if (state.notFound) {
     return (
@@ -57,6 +77,24 @@ export function ConversationDetailPage() {
     )
   }
 
+  // 本轮实时内容：工具活动 + 审批卡片。渲染在消息流末尾，
+  // 跟随用户当前视线，而不是固定在页面上方（D-012 第 2 条）。
+  const liveTurn =
+    toolActivity.length > 0 || pendingApproval ? (
+      <>
+        <ToolActivityList activities={toolActivity} />
+        {pendingApproval && (
+          <ApprovalCard
+            key={pendingApproval.approval_id}
+            request={pendingApproval}
+            busy={deciding}
+            onDecide={(decision, remember) => void decideApproval(decision, remember)}
+            onExpired={dismissApproval}
+          />
+        )}
+      </>
+    ) : null
+
   return (
     <section className="detail">
       <nav className="detail__nav">
@@ -67,20 +105,14 @@ export function ConversationDetailPage() {
         {state.loading && !state.conversation ? '正在加载…' : state.conversation?.title}
       </h2>
 
-      <ToolActivityList activities={toolActivity} />
-
-      {pendingApproval && (
-        <ApprovalCard
-          request={pendingApproval}
-          busy={deciding}
-          onDecide={(decision, remember) => void decideApproval(decision, remember)}
-        />
-      )}
-
       {state.loading && state.messages.length === 0 ? (
         <p className="messages__empty">正在加载消息…</p>
       ) : (
-        <MessageList messages={state.messages} streamingText={streamingText} />
+        <MessageList
+          messages={state.messages}
+          streamingText={streamingText}
+          liveTurn={liveTurn}
+        />
       )}
 
       <div ref={bottomRef} />

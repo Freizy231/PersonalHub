@@ -10,12 +10,17 @@ import { getSessionToken } from './session'
 export interface StreamHandlers {
   onDelta: (text: string) => void
   /** 工具调用的开始与结束。让用户看得见 AI 在做什么（AGENT.md §7.4 可理解摘要）。 */
-  onToolStart?: (payload: { id: string; name: string }) => void
+  onToolStart?: (payload: { id: string; name: string; display_name?: string }) => void
   onToolEnd?: (payload: { id: string; name: string; status: string; error_code?: string }) => void
+  /** 后端已受理这条消息（用户消息已入库）。此后取消失败也不该把原文还给输入框。 */
+  onAccepted?: () => void
   /** 需要用户审批。收到后对话会暂停，直到调用 approvals.decide。 */
   onApprovalRequired?: (payload: {
     approval_id: string
     tool: string
+    title?: string
+    summary?: { label: string; value: string }[]
+    arguments?: Record<string, unknown>
     preview: string
     expires_in: number
   }) => void
@@ -86,6 +91,10 @@ export async function streamChat(
     return
   }
 
+  // 走到这里说明后端返回 200：它在开始流式响应**之前**已经把用户消息入库。
+  // 从这里往后再取消，原文就不该还回输入框（否则会重发出重复消息）。
+  handlers.onAccepted?.()
+
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -111,10 +120,18 @@ export async function streamChat(
           if (typeof text === 'string') handlers.onDelta(text)
         } else if (frame.event === 'approval_required') {
           handlers.onApprovalRequired?.(
-            payload as { approval_id: string; tool: string; preview: string; expires_in: number },
+            payload as {
+              approval_id: string
+              tool: string
+              title?: string
+              summary?: { label: string; value: string }[]
+              arguments?: Record<string, unknown>
+              preview: string
+              expires_in: number
+            },
           )
         } else if (frame.event === 'tool_start') {
-          handlers.onToolStart?.(payload as { id: string; name: string })
+          handlers.onToolStart?.(payload as { id: string; name: string; display_name?: string })
         } else if (frame.event === 'tool_end') {
           handlers.onToolEnd?.(
             payload as { id: string; name: string; status: string; error_code?: string },

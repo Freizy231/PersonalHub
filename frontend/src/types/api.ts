@@ -12,6 +12,13 @@ export interface HealthResponse {
   timestamp: string
 }
 
+/** 单条消息的字符上限。与后端 `models.message.MAX_CONTENT_LENGTH` 保持一致。
+ *
+ * 放在共享类型里而不是某个组件内：前端有多处需要校验它，
+ * 分散硬编码会漂移（D-012）。
+ */
+export const MESSAGE_MAX_LENGTH = 100_000
+
 /** 与后端 ConversationOut 对应。时间为 ISO 8601 + Z（UTC）。 */
 export interface Conversation {
   id: string
@@ -109,10 +116,25 @@ export interface ApprovalList {
   total: number
 }
 
-/** 对话中出现的审批请求（来自 SSE approval_required 事件）。 */
+/** 对话中出现的审批请求（来自 SSE approval_required 事件）。
+ *
+ * summary / title / arguments 是给人看的（D-012）：
+ * - title：中文工具名，例如"创建任务"；
+ * - summary：逐项的「中文标签 + 值」，界面直接分行显示；
+ * - arguments：原始参数，只放在"查看原始参数"的折叠区里备查。
+ * preview 保留是为了兼容只显示纯文本的旧客户端。
+ */
+export interface ApprovalSummaryItem {
+  label: string
+  value: string
+}
+
 export interface ApprovalRequestEvent {
   approval_id: string
   tool: string
+  title?: string
+  summary?: ApprovalSummaryItem[]
+  arguments?: Record<string, unknown>
   preview: string
   expires_in: number
 }
