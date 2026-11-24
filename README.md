@@ -376,7 +376,7 @@ cd backend && uv run python scripts/diagnose_model.py
 | M6 | 治理与审批 | 已完成 |
 | M7 | 持久化任务运行时 | 已完成 |
 | M8 | 能力运行时（Capability Runtime） | 功能已完成（WASM 评估：暂不引入） |
-| M9 | System Builder（自然语言创建应用） | 进行中（第 1 步） |
+| M9 | System Builder（自然语言创建应用） | **已完成** |
 
 ## 开发环境要求
 
