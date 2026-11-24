@@ -17,6 +17,7 @@ from sqlalchemy import inspect
 
 from app.api import (
     approvals,
+    apps,
     capabilities,
     chat,
     conversations,
@@ -210,6 +211,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await _bootstrap_mcp(app)
         _bootstrap_plugins(app)
 
+        # M9：清理上次异常退出留下的 staging 目录。
+        # 只删超过 1 小时的：用户刚生成、还开着预览页的产物不能删。
+        # 清理失败不影响启动——它只是回收空间。
+        removed = app.state.app_store.cleanup_stale_staging(max_age_seconds=3600)
+        if removed:
+            logger.info("已清理遗留的生成临时目录", extra={"count": removed})
+
         # 后台 Worker：在应用生命周期内运行，关掉浏览器不影响它。
         # 数据库缺表时 Worker 会持续报错，因此只在表齐全时启动。
         worker: Worker | None = None
@@ -268,6 +276,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         capability_registry.register(manifest_from_skill(skill))
     app.state.capability_registry = capability_registry
 
+    # 生成的应用（M9）：staging 与已安装版本都由它管理。
+    # 数据目录延迟创建——构造它不碰文件系统，首次写入时才建目录。
+    from app.builder.staging import AppStore
+
+    app.state.app_store = AppStore(root=settings.builder_dir)
+
     # 会话级授权（"本次会话内不再询问"）。刻意放在内存：
     # 刷新页面/重启服务即失效，避免一次勾选变成永久放行（D-010）。
     from app.policy.grants import SessionGrants
@@ -299,6 +313,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(capabilities.router, prefix=settings.api_prefix)
     app.include_router(mcp.router, prefix=settings.api_prefix)
     app.include_router(plugins.router, prefix=settings.api_prefix)
+    app.include_router(apps.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app

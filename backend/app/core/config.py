@@ -122,6 +122,15 @@ class Settings:
         return self.data_dir / "plugins"
 
     @property
+    def builder_dir(self) -> Path:
+        """生成的 Personal App（M9）。
+
+        AppStore 在此目录下建立 `apps/`（已安装）与 `staging/`（生成中）。
+        只暴露一个根路径，避免两处各自拼路径产生不一致。
+        """
+        return self.data_dir / "builder"
+
+    @property
     def mcp_dir(self) -> Path:
         """MCP 配置与子进程工作目录（M8 第 4 项）。
 

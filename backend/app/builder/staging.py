@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 APP_FILENAME = "index.html"
 META_FILENAME = "meta.json"
+# staging 目录里的生成记录。安装时凭它得到名称、来源需求与模型，
+# 而不是让前端把需求再传一遍（前端传来的东西一律不可信）。
+STAGING_META_FILENAME = "requirement.json"
 POINTER_FILENAME = "current"
 VERSIONS_DIR = "versions"
 
@@ -101,6 +104,19 @@ class AppStore:
         target.write_text(html, encoding="utf-8")
         return target
 
+    def write_staging_meta(self, staging_id: str, data: dict) -> None:  # type: ignore[type-arg]
+        """把这次生成的需求与结果记录到 staging 目录。"""
+        path = self.staging_path(staging_id)
+        path.mkdir(parents=True, exist_ok=True)
+        self._write_json(path / STAGING_META_FILENAME, data)
+
+    def read_staging_meta(self, staging_id: str) -> dict | None:  # type: ignore[type-arg]
+        try:
+            path = self.staging_path(staging_id)
+        except BuilderError:
+            return None
+        return self._read_json(path / STAGING_META_FILENAME)
+
     def read_staging(self, staging_id: str) -> str | None:
         target = self.staging_path(staging_id) / APP_FILENAME
         if not target.is_file():
@@ -118,19 +134,33 @@ class AppStore:
             return
         shutil.rmtree(path, ignore_errors=True)
 
-    def cleanup_stale_staging(self, keep_ids: set[str] | None = None) -> int:
+    def cleanup_stale_staging(
+        self,
+        keep_ids: set[str] | None = None,
+        *,
+        max_age_seconds: float | None = None,
+    ) -> int:
         """清理遗留的 staging 目录，返回清理数量。
 
-        生成过程被中断时会留下目录；它们在下次启动时清理。
-        `keep_ids` 用于保留仍在使用的（例如正在预览的）。
+        生成过程被中断时会留下目录；它们在启动时清理。
+        `keep_ids` 保留仍在使用的（例如正在预览的）；
+        `max_age_seconds` 只清理超过该时长的目录——启动时用它，
+        避免把用户刚生成、还开着预览页的产物删掉。
         """
         if not self.staging_dir.is_dir():
             return 0
         keep = keep_ids or set()
+        cutoff = _now_ts() - max_age_seconds if max_age_seconds is not None else None
         removed = 0
         for child in self.staging_dir.iterdir():
             if not child.is_dir() or child.name in keep:
                 continue
+            if cutoff is not None:
+                try:
+                    if child.stat().st_mtime > cutoff:
+                        continue
+                except OSError:
+                    continue
             shutil.rmtree(child, ignore_errors=True)
             removed += 1
         return removed
@@ -372,6 +402,12 @@ def _now_iso() -> str:
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _now_ts() -> float:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).timestamp()
 
 
 def _now_stamp() -> str:

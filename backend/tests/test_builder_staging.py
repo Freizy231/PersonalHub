@@ -455,3 +455,47 @@ class TestInlineHandlers:
         )
 
         assert validate_app(html).ok
+
+
+class TestStagingAgeCleanup:
+    """启动时按时间清理：刚生成、还开着预览页的产物不能删。"""
+
+    def test_recent_staging_kept(self, tmp_path: Path) -> None:
+        store = AppStore(root=tmp_path / "data")
+        store.write_staging("aaaaaaaa1111", VALID_APP)
+
+        removed = store.cleanup_stale_staging(max_age_seconds=3600)
+
+        assert removed == 0
+        assert store.read_staging("aaaaaaaa1111") is not None
+
+    def test_old_staging_removed(self, tmp_path: Path) -> None:
+        import os
+        import time
+
+        store = AppStore(root=tmp_path / "data")
+        store.write_staging("aaaaaaaa1111", VALID_APP)
+        path = store.staging_path("aaaaaaaa1111")
+        old = time.time() - 7200
+        os.utime(path, (old, old))
+
+        removed = store.cleanup_stale_staging(max_age_seconds=3600)
+
+        assert removed == 1
+        assert store.read_staging("aaaaaaaa1111") is None
+
+    def test_staging_meta_round_trip(self, tmp_path: Path) -> None:
+        store = AppStore(root=tmp_path / "data")
+        store.write_staging("aaaaaaaa1111", VALID_APP)
+        store.write_staging_meta("aaaaaaaa1111", {"app_id": "app-x", "title": "待办"})
+
+        meta = store.read_staging_meta("aaaaaaaa1111")
+
+        assert meta is not None
+        assert meta["app_id"] == "app-x"
+
+    def test_staging_meta_missing(self, tmp_path: Path) -> None:
+        store = AppStore(root=tmp_path / "data")
+
+        assert store.read_staging_meta("nosuchid1") is None
+        assert store.read_staging_meta("../../etc") is None

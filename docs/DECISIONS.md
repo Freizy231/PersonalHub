@@ -910,3 +910,90 @@ tests/test_builder_generator.py      23 项测试（全部假 Provider）
 **回滚**：删除 `app/builder/generator.py`、`tests/test_builder_generator.py`，
 回退 `validate.py` 的 `_AppParser.handlers` 与 `_check_scripts` 签名。
 无数据库迁移，无新增依赖。
+
+## D-022：M9 第 4 步——应用接口与静态内容服务
+
+- 日期：2026-11-24
+- 状态：已实施
+- 规范条款：§4.15 System Builder、§7.1 错误结构、§8.4
+
+**本期范围**：HTTP 接口 + 安全响应头 + staging 启动清理。**没有前端**（第 5 步）。
+
+```
+app/api/apps.py                  8 个端点
+app/core/config.py               + builder_dir
+app/main.py                      挂载 app_store、router、启动清理
+tests/test_apps_api.py           22 项接口测试
+```
+
+**接口**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/apps` | 已安装应用列表 |
+| POST | `/apps/generate` | 描述 → 需求 → 生成 → 检查 → 写 staging（**不安装**） |
+| GET | `/apps/staging/{id}` | 生成结果摘要（标题、要素、大小） |
+| GET | `/apps/staging/{id}/content` | 原始 HTML（沙箱 iframe 的 src） |
+| POST | `/apps/staging/{id}/install` | 安装为新版本 |
+| DELETE | `/apps/staging/{id}` | 丢弃这次生成 |
+| GET | `/apps/{id}/content` | 已安装应用的 HTML |
+| POST | `/apps/{id}/rollback` | 回滚 |
+| DELETE | `/apps/{id}` | 卸载（保留目录） |
+
+**安全响应头只有一个来源**
+
+`APP_SECURITY_HEADERS` 是常量，预览与已安装应用的内容**都**由它返回。
+预览不是"先放松再收紧"——两者走完全相同的机制。测试对两处都断言了
+CSP、`nosniff`、`no-store`、`CORP`。
+
+CSP 在提案给的值上补了两条：
+
+- `connect-src 'none'`：`default-src 'none'` 已覆盖，单独写出是为了让
+  "禁止联网"在代码里一眼可见，而不是藏在默认值里；
+- `base-uri 'none'` + `form-action 'none'`：禁止 `<base>` 改变相对路径解析、
+  禁止表单提交导航（静态检查已禁用这两个标签，这里是第二层）。
+
+**前端不能注入内容**
+
+`install` 只接受 staging id，HTML 取自后端自己写下的 `staging/<id>/index.html`。
+`POST /apps/generate` 的请求体 `extra="forbid"`，多传 `html` 字段直接 422
+（有测试）。这样即使前端被攻破，也无法让后端安装一段任意 HTML。
+
+**失败不落盘**
+
+`generate` 的写 staging 是**最后一步**，在需求解析、模型生成、静态检查全部
+通过之后。检查失败时 `staging/` 目录里一个子目录都不会出现（有测试断言）。
+
+**启动清理按时间，而不是全删**
+
+`cleanup_stale_staging(max_age_seconds=3600)`：只删超过 1 小时没动过的目录。
+全删会在开发时误伤——用户刚生成、预览页还开着，重启后端的瞬间产物消失。
+AppStore 的接口保留"全删"能力（`keep_ids` + 不传时长大小时），
+启动路径选择保守的一档。
+
+**没有下载接口（刻意的）**
+
+不提供 `/download`。下载会让应用脱离沙箱被本地打开（`file://` 下的任意 HTML），
+与"应用只能在沙箱里跑"的约束矛盾。有测试断言几个常见下载路径均 404。
+
+**外发审计**
+
+生成会把用户描述发给模型，与对话同等对待，`record_egress` 记录
+provider / model / 字符数 / 结果，**不记录描述正文**（同 D-004 原则）。
+
+**版本号策略**
+
+首次安装 `1.0.0`，之后补丁号 +1。刻意不做自动语义化升版——猜不出用户意图。
+需要大改时卸载重装。同标题重生成得到同一个 `app_id`（第 2 步的稳定哈希），
+所以第二次安装是"新版本"，不是"第二个应用"。
+
+**已知限制**
+
+- 应用数量上限 50、单应用版本上限 10（第 1 步定下），接口未额外暴露删除旧版本的能力。
+- `{app_id}` 路径参数交给 `AppStore` 的 `sanitize_app_id` 校验，
+  非法值表现为 404 而不是 422——刻意不泄露"格式对不对"。
+- 生成是同步请求，模型慢时前端需要长时间等待。第 5 步前端需给出进度提示；
+  若要改成后台作业，属于后续演进（M10 任务系统已有作业队列可用）。
+
+**回滚**：删除 `app/api/apps.py`、`tests/test_apps_api.py`，回退 `main.py` 的两处接线、
+`config.py` 的 `builder_dir`。无数据库迁移，无新增依赖。

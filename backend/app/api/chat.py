@@ -80,7 +80,7 @@ def build_provider(settings: Settings) -> OpenAICompatibleProvider:
     )
 
 
-def _config_hint(settings: Settings, reason: str) -> str:
+def provider_config_hint(settings: Settings, reason: str) -> str:
     """把配置异常翻译成用户能照着做的提示。
 
     reason 来自 ProviderConfigurationError，内容是本模块写死的固定文案，可安全外露。
@@ -236,7 +236,7 @@ async def stream_chat(
         raise PublicMessageError(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             code="PROVIDER_NOT_CONFIGURED",
-            message=_config_hint(settings, str(exc)),
+            message=provider_config_hint(settings, str(exc)),
         ) from exc
 
     # 1) 先保存用户消息。即使用户随后取消，他的提问也不该丢。
