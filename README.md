@@ -344,6 +344,7 @@ cd backend && uv run python scripts/diagnose_model.py
 | M6 | 治理与审批 | 已完成 |
 | M7 | 持久化任务运行时 | 已完成 |
 | M8 | 能力运行时（Capability Runtime） | 功能已完成（WASM 评估：暂不引入） |
+| M9 | System Builder（自然语言创建应用） | 进行中（第 1 步） |
 
 ## 开发环境要求
 
@@ -386,7 +387,7 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（634 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# 后端测试（697 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
 # workspace 隔离、role 伪造防护、流式对话、取消语义（含断开即停止生成）、
 # 历史取尾部、外发审计、代理处理、记忆提取/审核/注入隔离/去重、Agent 循环、
 # 工具 Broker、参数校验、审批人话摘要、审批绑定/过期/一次性消费/越权、
@@ -395,7 +396,8 @@ cd frontend && npm run dev
 # 技能解析/校验/不执行代码/路径穿越防护/对话注入、
 # MCP 配置校验/命令白名单/失败隔离/一律 WRITE/代理链路/不可信标注、
 # 插件清单校验/组合风险传播/双层审批/路径逃逸/卸载保留目录、
-# 沙箱隔离（真实 bwrap：主目录/网络/只读/CPU/内存/密钥））
+# 沙箱隔离（真实 bwrap：主目录/网络/只读/CPU/内存/密钥）、
+# 生成应用静态检查（14 条禁项）/版本管理/原子安装/回滚）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 

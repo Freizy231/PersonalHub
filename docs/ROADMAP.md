@@ -361,7 +361,31 @@ M7 未交付（理由）：
 - [ ] 能力只存在于内存，重启后从内建工具重建；第三方能力将来需要落库
 
 
-## 阶段 C–D
+## 阶段 C：Personal Hub System Builder（M9）
 
-- M9 System Builder — 未开始（下一步）
+### M9 — Natural-language Software Creation — 进行中
+
+提案：`docs/PROPOSAL_M9.md`（用户已批准）
+
+第一步：Staging Workspace 与静态检查（2026-11-24）
+- [x] `validate.py`：HTML 结构 + 14 条 JS 禁项 + 标签/属性/外链检查
+- [x] 一次列出全部问题；注释同样检查（宁可误杀）
+- [x] `staging.py`：staging 隔离、版本目录、原子指针切换、回滚、卸载
+- [x] 版本号按数字排序；指针被篡改时判为无效
+- [x] 安装失败不破坏旧版本（模拟 OSError 验证）
+- [x] **实测三种静态检查绕过手法**，均被浏览器 CSP 阻断
+      （记录为 `TestKnownBypasses`，固定"静态检查不是唯一防线"这一假设）
+- [x] 后端 697 项测试（本步新增 63 项）
+
+未开始：
+- [ ] 第 2 步 Requirement Engine（需求解析）
+- [ ] 第 3 步 Generator（代码生成）
+- [ ] 第 4 步 API + 静态文件服务（含安全响应头）+ staging 清理接线
+- [ ] 第 5 步 前端：应用列表页 + 沙箱预览页
+- [ ] 第 6 步 集成测试（真实浏览器验证沙箱边界）
+- [ ] 第 7 步 文档 D-020
+
+
+## 阶段 D
+
 - M10 Sync & Community — 未开始
