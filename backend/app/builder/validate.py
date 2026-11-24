@@ -16,6 +16,11 @@ iframe 的 `sandbox` 与 CSP——静态检查是基于文本匹配的，可能�
 | `window['fetch']('...')` | ❌ 放行 | ✅ 阻断 |
 
 三条绕过路径在浏览器里全部失败，网络面板零外部请求。
+
+**另一处实测缺口（第 3 步发现）**：初版只扫描 `<script>` 正文，
+`<li onclick="fetch('/x')">` 直接漏过——内联事件处理器同样是 JavaScript。
+已改为把 `on*` 属性的值并入同一套检查（有测试）。这条缺口说明
+"逐项列举代码出现的位置"很容易漏，因此检查函数刻意做得宽：宁可误杀。
 这证明静态检查**不能**作为唯一防线——但也说明不必追求
 "静态检查做到滴水不漏"，因为第二层确实可靠。
 
@@ -132,6 +137,7 @@ class _AppParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.tags: list[tuple[str, dict[str, str | None]]] = []
         self.scripts: list[str] = []
+        self.handlers: list[str] = []
         self._in_script = False
         self._script_depth = 0
         self.has_html_element = False
@@ -142,6 +148,12 @@ class _AppParser(HTMLParser):
         if tag == "script":
             self._in_script = True
             self._script_depth = 1
+        for name, value in attrs:
+            # 内联事件处理器（onclick=…）也是 JavaScript 代码。
+            # 实测教训：初版只扫 <script> 正文，"onclick=\"fetch('/x')\"" 直接漏过。
+            # CSP 的 unsafe-inline 同样允许事件处理器，因此这里必须一并检查。
+            if value and name.lower().startswith("on"):
+                self.handlers.append(value)
         self.tags.append((tag, dict(attrs)))
 
     def handle_endtag(self, tag: str) -> None:
@@ -194,9 +206,10 @@ def _check_structure(parser: _AppParser) -> list[Issue]:
     return issues
 
 
-def _check_scripts(scripts: list[str]) -> list[Issue]:
+def _check_scripts(scripts: list[str], handlers: list[str]) -> list[Issue]:
     issues: list[Issue] = []
-    joined = "\n".join(scripts)
+    # 内联事件处理器与 <script> 正文同等对待。
+    joined = "\n".join([*scripts, *handlers])
 
     for rule, pattern, message in _FORBIDDEN_JS:
         match = pattern.search(joined)
@@ -242,7 +255,7 @@ def validate_app(html: str, *, max_bytes: int = MAX_APP_BYTES) -> ValidationResu
         issues.append(Issue("no_content", "应用没有任何 HTML 内容"))
 
     issues.extend(_check_structure(parser))
-    issues.extend(_check_scripts(parser.scripts))
+    issues.extend(_check_scripts(parser.scripts, parser.handlers))
 
     return ValidationResult(ok=not issues, issues=tuple(issues))
 

@@ -427,3 +427,31 @@ class TestKnownBypasses:
         assert result.ok, (
             "如果这条开始失败，说明静态检查变强了——请更新 validate.py 模块文档里的绕过手法表格"
         )
+
+
+class TestInlineHandlers:
+    """内联事件处理器同样是代码（第 3 步发现的缺口）。"""
+
+    @pytest.mark.parametrize(
+        "snippet,rule",
+        [
+            ("<li onclick=\"fetch('/x')\">读书</li>", "network_fetch"),
+            ("<img src='data:,' onerror=\"new XMLHttpRequest()\">", "network_xhr"),
+            ("<body onload=\"localStorage.setItem('a','b')\">", "storage_access"),
+            ("<a href='#' onclick=\"eval('1')\">x</a>", "code_eval"),
+        ],
+    )
+    def test_handler_bodies_are_checked(self, snippet: str, rule: str) -> None:
+        html = f"<html><body><ul>{snippet}</ul></body></html>"
+
+        result = validate_app(html)
+
+        assert not result.ok
+        assert any(issue.rule == rule for issue in result.issues), result.messages
+
+    def test_harmless_handler_allowed(self) -> None:
+        html = (
+            "<html><body><button onclick=\"this.textContent='已点击'\">按我</button></body></html>"
+        )
+
+        assert validate_app(html).ok
