@@ -431,3 +431,81 @@ class TestManifestFromTool:
 
         assert write.permissions == ("tool:create_task:write",)
         assert read.permissions == ("tool:list_tasks:read",)
+
+
+class TestAppSimilarity:
+    """需求与已安装应用的相似度（M9「优先复用」的检索层）。
+
+    阈值刻意保守：复用错了会让用户拿到不相干的应用，比"没复用"更糟。
+    """
+
+    def _registry(self):  # type: ignore[no-untyped-def]
+        from app.capabilities.registry import CapabilityRegistry, manifest_from_app
+
+        registry = CapabilityRegistry()
+        registry.register(
+            manifest_from_app(
+                app_id="app.pomodoro",
+                name="番茄钟",
+                version="1.0.0",
+                description="25 分钟倒计时，可以开始、暂停和重置",
+            )
+        )
+        registry.register(
+            manifest_from_app(
+                app_id="app.todo",
+                name="待办清单",
+                version="1.0.0",
+                description="展示一份固定的待办事项",
+            )
+        )
+        return registry
+
+    def test_matches_by_shared_terms(self) -> None:
+        matches = self._registry().find_similar_apps("做一个番茄钟计时器")
+
+        assert matches
+        assert matches[0].manifest.id == "app.pomodoro"
+        assert "番茄" in matches[0].matched_terms
+
+    def test_unrelated_request_matches_nothing(self) -> None:
+        assert self._registry().find_similar_apps("做一个 BMI 计算器") == []
+
+    def test_ignores_non_app_capabilities(self) -> None:
+        """工具与技能不该参与"复用已有应用"的判断。"""
+        from app.capabilities.manifest import CapabilityManifest
+        from app.capabilities.registry import CapabilityRegistry
+
+        registry = CapabilityRegistry()
+        registry.register(
+            CapabilityManifest(
+                id="builtin.todo_search",
+                name="待办清单搜索",
+                version="1.0.0",
+                type="tool",
+                description="按关键词搜索待办",
+            )
+        )
+
+        assert registry.find_similar_apps("做一个待办清单") == []
+
+    def test_empty_query_returns_nothing(self) -> None:
+        assert self._registry().find_similar_apps("   ") == []
+
+    def test_limit_is_respected(self) -> None:
+        from app.capabilities.registry import CapabilityRegistry, manifest_from_app
+
+        registry = CapabilityRegistry()
+        for index in range(5):
+            registry.register(
+                manifest_from_app(
+                    app_id=f"app.todo-{index}",
+                    name=f"待办清单 {index}",
+                    version="1.0.0",
+                    description="展示一份固定的待办事项",
+                )
+            )
+
+        matches = registry.find_similar_apps("做一个待办事项清单", limit=2)
+
+        assert len(matches) == 2

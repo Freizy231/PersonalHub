@@ -302,6 +302,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.app_store = AppStore(root=settings.builder_dir)
 
+    # 已安装应用也投影进能力注册表：这样「生成」前能检索已有应用、
+    # 优先复用（AGENT.md M9 交付项）。
+    from app.capabilities.registry import manifest_from_app
+
+    for installed_app in app.state.app_store.list_apps():
+        if not installed_app.ok or installed_app.version is None:
+            continue
+        try:
+            capability_registry.register(
+                manifest_from_app(
+                    app_id=f"app.{installed_app.id}",
+                    name=installed_app.name,
+                    version=installed_app.version,
+                    description=installed_app.description,
+                ),
+                replace=True,
+            )
+        except Exception:  # noqa: BLE001 - 单个应用损坏不影响启动
+            logger.warning("应用能力登记失败", extra={"app_id": installed_app.id})
+
     # 会话级授权（"本次会话内不再询问"）。刻意放在内存：
     # 刷新页面/重启服务即失效，避免一次勾选变成永久放行（D-010）。
     from app.policy.grants import SessionGrants

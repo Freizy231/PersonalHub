@@ -247,11 +247,17 @@ export const api = {
      *
      * 刻意不设长超时：接口已经不再耗时，长超时只会掩盖真正的问题。
      */
-    generate: (prompt: string) =>
+    /**
+     * 提交生成作业。
+     *
+     * `force=false` 时，后端发现相似应用会**跳过生成**并返回 similar 清单，
+     * 由用户决定"用已有的"还是"仍然重新生成"。
+     */
+    generate: (prompt: string, force = false) =>
       request<GenerateAccepted>('/apps/generate', {
         method: 'POST',
         headers: JSON_HEADERS,
-        body: JSON.stringify({ request: prompt }),
+        body: JSON.stringify({ request: prompt, force }),
       }),
 
     staged: (stagingId: string) =>

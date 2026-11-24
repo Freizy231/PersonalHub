@@ -308,6 +308,18 @@ export interface GenerateAccepted {
   staging_id: string
   status: string
   job_url: string
+  /** 与需求接近的已安装应用。非空时应先提示复用。 */
+  similar: SimilarApp[]
+  /** 因为发现相似应用而没有提交生成（此时 job_id 为空串）。 */
+  skipped: boolean
+}
+
+export interface SimilarApp {
+  app_id: string
+  name: string
+  description: string
+  version: string
+  matched_terms: string[]
 }
 
 /** 生成完成后的摘要（来自作业的 checkpoint）。 */

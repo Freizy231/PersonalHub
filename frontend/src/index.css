@@ -2387,3 +2387,62 @@ a.button:hover {
   padding: 3px 10px;
   font-size: 0.8rem;
 }
+
+/* 「优先复用」提示：生成的入口，但不是报错也不是成功，用中性强调色。 */
+.app-reuse {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+.app-reuse__title {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.app-reuse__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-reuse__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.app-reuse__name {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.app-reuse__desc {
+  flex: 1;
+  min-width: 10em;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.app-reuse__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.app-reuse__hint {
+  flex: 1;
+  min-width: 12em;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}

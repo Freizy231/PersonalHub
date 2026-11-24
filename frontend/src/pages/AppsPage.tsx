@@ -6,7 +6,7 @@ import {
   loadPendingJob,
   rememberPendingJob,
 } from '../services/pendingJob'
-import type { AppInfo, JobDetail, StagedApp } from '../types/api'
+import type { AppInfo, JobDetail, SimilarApp, StagedApp } from '../types/api'
 
 /**
  * 应用中心：用一句话描述，生成一个带界面的小应用。
@@ -58,6 +58,13 @@ export function AppsPage() {
   const [staged, setStaged] = useState<StagedApp | null>(null)
   /** 正在轮询的作业。用于显示"可以去做别的事"和提供取消入口。 */
   const [activeJob, setActiveJob] = useState<JobDetail | null>(null)
+  /**
+   * 提交时发现相似应用：先问用户要不要复用，而不是直接生成。
+   * 保留原始描述，用户选择"仍然重新生成"时要用它再提交一次。
+   */
+  const [reuseHint, setReuseHint] = useState<{ prompt: string; apps: SimilarApp[] } | null>(
+    null,
+  )
 
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -93,7 +100,7 @@ export function AppsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load])
 
-  async function handleGenerate() {
+  async function handleGenerate(force = false) {
     const text = prompt.trim()
     if (!text || generating) return
 
@@ -102,7 +109,7 @@ export function AppsPage() {
     setNotice(null)
     setStaged(null)
 
-    const submitted = await api.apps.generate(text)
+    const submitted = await api.apps.generate(text, force)
     if (!mounted.current) return
 
     if (!submitted.ok) {
@@ -111,6 +118,15 @@ export function AppsPage() {
       setGenError(submitted.message)
       return
     }
+
+    // 「优先复用」：后端发现已安装的应用已能满足需求时**没有提交作业**。
+    // 这里只提示，决定权交给用户——不替他决定"用旧的"或"造新的"。
+    if (submitted.data.skipped) {
+      setGenerating(false)
+      setReuseHint({ prompt: text, apps: submitted.data.similar })
+      return
+    }
+    setReuseHint(null)
 
     const { job_id: jobId, staging_id: stagingId } = submitted.data
     rememberPendingJob({ jobId, stagingId })
@@ -359,6 +375,48 @@ export function AppsPage() {
       {genError && (
         <div className="alert alert--error" role="alert">
           <p>{genError}</p>
+        </div>
+      )}
+
+      {reuseHint && (
+        <div className="app-reuse" role="status">
+          <p className="app-reuse__title">你已经有一个可能满足需求的应用：</p>
+          <ul className="app-reuse__list">
+            {reuseHint.apps.map((item) => (
+              <li key={item.app_id} className="app-reuse__item">
+                <span className="app-reuse__name">{item.name}</span>
+                <span className="app-reuse__desc">{item.description}</span>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    setReuseHint(null)
+                    setNotice(`已使用「${item.name}」。它就在下面的列表里。`)
+                  }}
+                >
+                  用这个
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="app-reuse__actions">
+            <span className="app-reuse__hint">
+              重新生成会再花一次模型调用，并新增一个独立的应用。
+            </span>
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                setReuseHint(null)
+                void handleGenerate(true)
+              }}
+            >
+              仍然重新生成
+            </button>
+            <button type="button" className="button" onClick={() => setReuseHint(null)}>
+              取消
+            </button>
+          </div>
         </div>
       )}
 

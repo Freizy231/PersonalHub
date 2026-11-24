@@ -85,10 +85,24 @@ APP_SECURITY_HEADERS = {
 }
 
 
+class SimilarAppOut(BaseModel):
+    """一个可能已经满足需求的已安装应用。"""
+
+    app_id: str
+    name: str
+    description: str
+    version: str
+    matched_terms: list[str]
+
+
 class GenerateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request: str = Field(min_length=1, max_length=MAX_REQUEST_CHARS)
+    # 「优先复用」的落地方式：默认**不**生成，先问用户要不要复用已有的。
+    # 只有用户明确说"还是重新生成"时才为 True。
+    # 为什么不让模型自己决定：复用还是重新生成，是用户的判断，不是它的。
+    force: bool = False
 
 
 class GenerateAcceptedOut(BaseModel):
@@ -99,6 +113,11 @@ class GenerateAcceptedOut(BaseModel):
     status: str
     # 轮询地址：前端不必自己拼路径，也便于将来改路由。
     job_url: str
+    # 与需求高度接近的已安装应用。非空时前端应**先提示复用**，
+    # 而不是直接展示生成结果（见 generate 的说明）。
+    similar: list[SimilarAppOut] = []
+    # 因为发现相似应用而没有提交生成。此时 job_id 为空串。
+    skipped: bool = False
 
 
 class StagedAppOut(BaseModel):
@@ -219,6 +238,25 @@ async def generate(
             message=str(exc),
         ) from exc
 
+    # 「优先复用」（AGENT.md M9 交付项，提案 §5.2）：
+    # 已有应用能满足时，不该再花一次模型调用去造一个几乎一样的。
+    # 这里**只提示、不替用户决定**：命中就返回相似清单并跳过生成，
+    # 由用户选择"用已有的"还是"仍然重新生成"（后者带 force=true）。
+    similar = _similar_apps(request, text)
+    if similar and not payload.force:
+        logger.info(
+            "发现相似应用，未提交生成",
+            extra={"matched": [item.app_id for item in similar]},
+        )
+        return GenerateAcceptedOut(
+            job_id="",
+            staging_id="",
+            status="SKIPPED",
+            job_url="",
+            similar=similar,
+            skipped=True,
+        )
+
     staging_id = _new_staging_id()
     job, created = queue.enqueue(
         session,
@@ -242,7 +280,56 @@ async def generate(
         staging_id=staging_id,
         status=job.status,
         job_url=f"/api/v1/jobs/{job.id}",
+        similar=similar,
     )
+
+
+def _register_app(request: Request, app) -> None:  # type: ignore[no-untyped-def]
+    """把刚安装的应用投影进能力注册表，供「优先复用」检索。
+
+    失败只记日志：安装本身已经成功，注册表只是加速查找用的索引。
+    """
+    registry = getattr(request.app.state, "capability_registry", None)
+    if registry is None or app.version is None:
+        return
+    from app.capabilities.registry import CapabilityRegistryError, manifest_from_app
+
+    manifest = manifest_from_app(
+        app_id=f"app.{app.id}",
+        name=app.name,
+        version=app.version,
+        description=app.description,
+    )
+    try:
+        registry.register(manifest, replace=True)
+    except CapabilityRegistryError:
+        logger.warning("应用能力登记失败", extra={"app_id": app.id})
+
+
+def _similar_apps(request: Request, text: str) -> list[SimilarAppOut]:
+    """在已安装应用里找与需求接近的。
+
+    依赖 app.state.capability_registry（已安装应用在安装/启动时投影进去）。
+    注册表不可用时返回空——查找相似只是优化，不该让生成失败。
+    """
+    registry = getattr(request.app.state, "capability_registry", None)
+    if registry is None:
+        return []
+    try:
+        matches = registry.find_similar_apps(text)
+    except Exception:  # noqa: BLE001 - 检索失败不影响主流程
+        logger.warning("相似应用检索失败", exc_info=True)
+        return []
+    return [
+        SimilarAppOut(
+            app_id=match.manifest.id.removeprefix("app."),
+            name=match.manifest.name,
+            description=match.manifest.description,
+            version=match.manifest.version,
+            matched_terms=list(match.matched_terms),
+        )
+        for match in matches
+    ]
 
 
 @router.get("/staging/{staging_id}", response_model=PreviewOut, summary="读取生成结果")
@@ -337,6 +424,8 @@ async def install(request: Request, staging_id: str) -> InstallOut:
 
     # 安装成功后丢弃 staging：内容已经在正式目录里，留着只会占空间。
     store.discard_staging(staging_id)
+
+    _register_app(request, installed)
 
     logger.info("应用已安装", extra={"app_id": installed.id, "version": installed.version})
     return InstallOut(

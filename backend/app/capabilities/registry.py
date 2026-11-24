@@ -63,6 +63,28 @@ class SearchResult:
     total: int
 
 
+@dataclass(frozen=True, slots=True)
+class AppMatch:
+    """需求与某个已安装应用的匹配结果（M9 能力复用）。"""
+
+    manifest: CapabilityManifest
+    score: int
+    matched_terms: tuple[str, ...]
+
+
+# 中文需求不会以空格分词，也不能靠英文分词。这里用**二字组（bigram）**：
+# "番茄钟计时器" → 番茄、茄钟、钟计、计时、时器。
+# 为什么不引入分词库：多一个依赖、多一份词典维护，而二字的重合
+# 对"检索已有应用"这个粗粒度任务已经够用；判错了也只是"没复用"，不会有副作用。
+_ASCII_WORD = re.compile(r"[A-Za-z0-9]+")
+
+# 匹配阈值：至少要有 2 个词重合且覆盖率不低于 30%。
+# 刻意的保守——"优先复用"用错了会让用户拿到一个不相干的应用，
+# 比"没有复用、重新生成"更糟。
+MIN_MATCH_TERMS = 2
+MIN_COVERAGE = 0.3
+
+
 class CapabilityRegistry:
     """进程内能力注册表，按 id + 版本存放 Manifest。"""
 
@@ -160,6 +182,37 @@ class CapabilityRegistry:
             items.append(manifest)
         return SearchResult(items=tuple(items), total=len(items))
 
+    def find_similar_apps(self, request_text: str, *, limit: int = 3) -> list[AppMatch]:
+        """在已登记的 App 能力里找与需求最接近的（M9「优先复用」）。
+
+        只比较**已安装应用的描述文本**（名称 + 描述），不比较 UI 细节——
+        我们并不知道用户界面的语义。
+        """
+        terms = _terms(request_text)
+        if not terms:
+            return []
+
+        matches: list[AppMatch] = []
+        for manifest in self.all():
+            if manifest.type is not CapabilityType.APP:
+                continue
+            candidate = _terms(f"{manifest.name} {manifest.description}")
+            shared = tuple(sorted(terms & candidate))
+            if len(shared) < MIN_MATCH_TERMS:
+                continue
+            coverage = len(shared) / len(terms)
+            if coverage < MIN_COVERAGE:
+                continue
+            matches.append(
+                AppMatch(
+                    manifest=manifest,
+                    score=int(coverage * 100),
+                    matched_terms=shared,
+                )
+            )
+        matches.sort(key=lambda item: (-item.score, item.manifest.id))
+        return matches[:limit]
+
     def missing_dependencies(self) -> dict[str, tuple[str, ...]]:
         """返回"依赖了不存在的能力"的清单：能力 id -> 缺失的依赖 id。
 
@@ -207,6 +260,19 @@ class CapabilityRegistry:
         return len(self._by_id)
 
 
+def _terms(text: str) -> set[str]:
+    """把一段文本切成可比较的词元。中英混排都能处理。"""
+    normalized = text.lower()
+    terms: set[str] = set(_ASCII_WORD.findall(normalized))
+    # 中文：连续汉字段内取二字组。
+    for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
+        if len(run) == 1:
+            terms.add(run)
+            continue
+        terms.update(run[index : index + 2] for index in range(len(run) - 1))
+    return terms
+
+
 def manifest_from_tool(
     definition,  # type: ignore[no-untyped-def]
     *,
@@ -239,6 +305,36 @@ def manifest_from_tool(
         permissions=(f"tool:{definition.name}:{definition.risk.value.lower()}",),
         compatibility=">=0.2.0",
         source="builtin",  # type: ignore[arg-type]
+    )
+
+
+def manifest_from_app(
+    *,
+    app_id: str,
+    name: str,
+    version: str,
+    description: str = "",
+) -> CapabilityManifest:
+    """把一个已安装的 Personal App 投影成能力 Manifest（M9「优先复用」）。
+
+    为什么用 `app.<id>` 而不是 `builtin.*`：来源不同，
+    界面要能区分"内核自带的能力"和"你用自然语言生成的应用"。
+    """
+    # 应用 id 形如 `app-<hash>`（见 requirement.build_app_id）。
+    # 能力 id 用 `app.<id>`：前缀区分来源，其余字符原样保留以便追溯。
+    if not re.match(r"^app\.[a-z][a-z0-9-]{1,70}$", app_id):
+        raise ManifestError(f"应用 id 无法转换为能力 id：{app_id!r}")
+    return CapabilityManifest(
+        id=app_id,
+        name=name or app_id,
+        version=version,
+        type=CapabilityType.APP,
+        description=description,
+        output_schema={"type": "text/html", "description": "单文件 HTML 应用"},
+        runtime=CapabilityRuntime.BUILTIN,
+        permissions=("app:render",),
+        compatibility=">=0.3.0",
+        source=CapabilitySource.INSTALLED,
     )
 
 

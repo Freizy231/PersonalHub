@@ -145,7 +145,7 @@ M8 已完成扩展能力基础设施，但只覆盖了**一半**：
 ```
 app/builder/
   requirement.py    需求解析：自然语言 -> 结构化需求（调用模型，输出严格 Schema）
-  capability_search.py  检索已有能力（M8 的 CapabilityRegistry），优先复用
+  registry.py       已安装应用的 Manifest 投影（检索在 CapabilityRegistry 内）
   generator.py      生成应用（调用模型，产出单文件 HTML）
   validate.py       静态检查：HTML 结构、CSP 兼容性、禁用 API、大小上限
   staging.py        Staging Workspace：临时目录、版本、原子安装、回滚

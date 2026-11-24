@@ -90,15 +90,20 @@ def _wait_job(client: TestClient, job_id: str, timeout: float = 15.0) -> dict:
     raise AssertionError(f"作业未在 {timeout} 秒内结束：{detail}")
 
 
-def _submit(client: TestClient, request: str = "做一个待办清单") -> dict:
-    response = client.post(f"{API}/apps/generate", json={"request": request})
+def _submit(client: TestClient, request: str = "做一个待办清单", *, force: bool = False) -> dict:
+    """提交生成。
+
+    `force=True` 表示"我知道有相似应用，仍然重新生成"——
+    装了同名应用后，第二次生成默认会被「优先复用」拦下。
+    """
+    response = client.post(f"{API}/apps/generate", json={"request": request, "force": force})
     assert response.status_code == 202, response.text
     return response.json()
 
 
-def _generate(client: TestClient, request: str = "做一个待办清单") -> dict:
+def _generate(client: TestClient, request: str = "做一个待办清单", *, force: bool = False) -> dict:
     """提交并等到成功，返回 job 的 checkpoint（含 staging_id 等摘要）。"""
-    accepted = _submit(client, request)
+    accepted = _submit(client, request, force=force)
     detail = _wait_job(client, accepted["job_id"])
     assert detail["status"] == "SUCCEEDED", detail
     return {"staging_id": accepted["staging_id"], **detail["runs"][-1]["result"]}
@@ -266,7 +271,7 @@ class TestInstall:
         app_client.post(f"{API}/apps/staging/{first['staging_id']}/install")
 
         app_client.app.state.fake_provider.scripts = [REQUIREMENT_JSON, GOOD_APP]
-        second = _generate(app_client)
+        second = _generate(app_client, force=True)
         response = app_client.post(f"{API}/apps/staging/{second['staging_id']}/install")
 
         app = response.json()["app"]
@@ -308,7 +313,7 @@ class TestRollback:
             REQUIREMENT_JSON,
             GOOD_APP.replace("读书", "跑步"),
         ]
-        second = _generate(app_client)
+        second = _generate(app_client, force=True)
         app_client.post(f"{API}/apps/staging/{second['staging_id']}/install")
 
         response = app_client.post(f"{API}/apps/{app_id}/rollback")
@@ -374,3 +379,64 @@ class TestContentSecurity:
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "APP_NOT_FOUND"
+
+
+class TestCapabilityReuse:
+    """「优先复用」（AGENT.md M9 交付项）：已有应用能满足时先提示，不盲目生成。
+
+    为什么这是硬要求：每次生成都要花两次模型调用。
+    用户说"做一个番茄钟"，而他已经有一个番茄钟时，生成一个几乎一样的
+    新应用既浪费，也让他多了一个要维护的东西。
+    """
+
+    def test_no_match_generates_normally(self, app_client: TestClient) -> None:
+        body = _submit(app_client, "做一个待办清单")
+
+        assert body["skipped"] is False
+        assert body["job_id"]
+
+    def test_similar_app_prompts_reuse_instead_of_generating(self, app_client: TestClient) -> None:
+        staged = _generate(app_client, "做一个待办清单")
+        app_client.post(f"{API}/apps/staging/{staged['staging_id']}/install")
+
+        body = _submit(app_client, "做一个待办事项清单")
+
+        assert body["skipped"] is True
+        assert body["job_id"] == ""
+        assert len(body["similar"]) == 1
+        assert body["similar"][0]["name"] == "待办清单"
+        assert body["similar"][0]["app_id"].startswith("app-")
+        # 命中时**不产生作业**：否则"跳过"就只是挡住了响应，后台还在花钱。
+        assert app_client.get(f"{API}/jobs").json()["total"] == 1
+
+    def test_force_generates_anyway(self, app_client: TestClient) -> None:
+        staged = _generate(app_client, "做一个待办清单")
+        app_client.post(f"{API}/apps/staging/{staged['staging_id']}/install")
+
+        body = _submit(app_client, "做一个待办事项清单", force=True)
+
+        assert body["skipped"] is False
+        assert body["job_id"]
+        # 即使强行生成，也仍然把相似应用告诉用户（便于中途改变主意）。
+        assert body["similar"][0]["name"] == "待办清单"
+
+    def test_unrelated_request_not_matched(self, app_client: TestClient) -> None:
+        staged = _generate(app_client, "做一个待办清单")
+        app_client.post(f"{API}/apps/staging/{staged['staging_id']}/install")
+
+        body = _submit(app_client, "做一个 BMI 计算器")
+
+        assert body["skipped"] is False
+        assert body["similar"] == []
+
+    def test_installed_app_appears_in_capability_list(self, app_client: TestClient) -> None:
+        """安装的应用也是"能力"，应当和能力一起被检索到。"""
+        staged = _generate(app_client, "做一个待办清单")
+        app_client.post(f"{API}/apps/staging/{staged['staging_id']}/install")
+
+        items = app_client.get(f"{API}/capabilities").json()["items"]
+
+        apps = [item for item in items if item["type"] == "app"]
+        assert len(apps) == 1
+        assert apps[0]["name"] == "待办清单"
+        assert apps[0]["source"] == "installed"
