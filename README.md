@@ -91,7 +91,7 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - **能力页**（导航「能力」）：列出系统已有的能力，可搜索、按类型筛选、
   展开参数结构
 - **声明不等于授权**：页面上明确标注"声明，非授权"，写操作仍需你确认
-- 尚未交付：WASM 评估（M8 第 8 项，属"评估"而非交付）
+- WASM 评估已完成，结论是暂不引入（见 [`docs/EVALUATION_WASM.md`](docs/EVALUATION_WASM.md)）
 
 #### 插件（进程）
 
@@ -343,7 +343,7 @@ cd backend && uv run python scripts/diagnose_model.py
 | M5 | Agent Loop 与只读工具 | 已完成 |
 | M6 | 治理与审批 | 已完成 |
 | M7 | 持久化任务运行时 | 已完成 |
-| M8 | 能力运行时（Capability Runtime） | 进行中（第 1–2 项） |
+| M8 | 能力运行时（Capability Runtime） | 功能已完成（WASM 评估：暂不引入） |
 
 ## 开发环境要求
 
