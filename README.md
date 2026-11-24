@@ -91,7 +91,43 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - **能力页**（导航「能力」）：列出系统已有的能力，可搜索、按类型筛选、
   展开参数结构
 - **声明不等于授权**：页面上明确标注"声明，非授权"，写操作仍需你确认
-- 尚未交付：Skills、MCP Client、隔离插件、安装/卸载（M8 第 3–8 项）
+- 尚未交付：MCP Client、隔离插件、安装/卸载（M8 第 4–8 项）
+
+#### 技能（Skills）
+
+把常用的工作方法写成一份 Markdown，AI 在任务匹配时会参考它。
+技能**只是文字**，不执行任何代码，也不会自己获得任何权限。
+
+```bash
+mkdir -p ~/.local/share/personal-hub/skills/weekly-report
+cat > ~/.local/share/personal-hub/skills/weekly-report/SKILL.md <<'SKILL'
+---
+name: 周报写作
+description: 按公司模板写周报
+version: 1.0.0
+---
+
+# 周报结构
+
+1. 本周进展（3 条）
+2. 遇到的问题
+3. 下周计划
+SKILL
+```
+
+格式规则（写错会在启动日志里提示具体原因，其他技能不受影响）：
+
+| 项 | 要求 |
+|---|---|
+| 目录名 | 即技能 id：小写字母、数字、`_`、`-` |
+| frontmatter | 必须用 `---` 包住，每行 `key: 值`，只支持 `name` / `description` / `version` |
+| 必需字段 | `name`、`description`（`version` 缺省为 1.0.0） |
+| 正文 | Markdown，上限 32,000 字符 |
+
+- 系统提示里只放技能名与一句话描述；AI 需要时再加载全文，不挤占上下文。
+- **修改技能后需重启服务**（启动时加载一次，保证对话中清单与内容一致）。
+- 写坏的技能会被跳过并在日志里说明原因，在「能力」页看不到它。
+- 能力页的「技能」类型下可以看到已加载的技能。
 
 ### 配置
 
@@ -193,12 +229,13 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（435 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# 后端测试（488 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
 # workspace 隔离、role 伪造防护、流式对话、取消语义（含断开即停止生成）、
 # 历史取尾部、外发审计、代理处理、记忆提取/审核/注入隔离/去重、Agent 循环、
 # 工具 Broker、参数校验、审批人话摘要、审批绑定/过期/一次性消费/越权、
 # Policy 决策、作业队列/重试/恢复/Worker、
-# 能力 Manifest 校验/版本排序/依赖环/声明非授权/只读 API）
+# 能力 Manifest 校验/版本排序/依赖环/声明非授权/只读 API、
+# 技能解析/校验/不执行代码/路径穿越防护/对话注入）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 

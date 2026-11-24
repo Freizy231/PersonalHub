@@ -17,7 +17,12 @@ from sqlalchemy import inspect
 
 from app.api import approvals, capabilities, chat, conversations, health, jobs, memory, messages
 from app.capabilities import ToolRegistry
-from app.capabilities.registry import CapabilityRegistry, manifest_from_tool
+from app.capabilities.registry import (
+    CapabilityRegistry,
+    manifest_from_skill,
+    manifest_from_tool,
+)
+from app.capabilities.skills import SkillLibrary, load_skills
 from app.capabilities.tools import register_builtin_tools
 from app.core.config import Settings, get_settings
 from app.core.errors import install_exception_handlers
@@ -106,8 +111,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # 工具注册表：显式登记 M5 的只读工具。不存在自动发现，
     # 避免某个模块被导入就悄悄获得能力（AGENT.md §4.9）。
+    # 用户技能（M8 第 3 项）：启动时加载一次，运行期只读。
+    # 刻意不做热重载：对话中途清单与正文不一致会让模型看到"清单里有、
+    # 加载时没了"的错位。改技能后重启服务即可（README 有说明）。
+    skill_results = load_skills(settings.skills_dir)
+    skill_library = SkillLibrary(skill_results)
+    app.state.skill_library = skill_library
+    for failure in skill_library.failures:
+        logger.warning(
+            "技能加载失败，已跳过",
+            extra={"directory": failure.directory, "reason": failure.error},
+        )
+
     tool_registry = ToolRegistry()
-    register_builtin_tools(tool_registry, app.state.session_factory)
+    register_builtin_tools(tool_registry, app.state.session_factory, skills=skill_library)
     app.state.tool_registry = tool_registry
 
     # 能力注册表（M8）：存放可检索、可展示的 Manifest 描述。
@@ -116,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     capability_registry = CapabilityRegistry()
     for definition in tool_registry.all():
         capability_registry.register(manifest_from_tool(definition))
+    for skill in skill_library.skills:
+        capability_registry.register(manifest_from_skill(skill))
     app.state.capability_registry = capability_registry
 
     # 会话级授权（"本次会话内不再询问"）。刻意放在内存：

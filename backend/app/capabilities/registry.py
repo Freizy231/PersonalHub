@@ -24,7 +24,13 @@ import logging
 import re
 from dataclasses import dataclass
 
-from app.capabilities.manifest import CapabilityManifest, CapabilityType, ManifestError
+from app.capabilities.manifest import (
+    CapabilityManifest,
+    CapabilityRuntime,
+    CapabilitySource,
+    CapabilityType,
+    ManifestError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,4 +239,29 @@ def manifest_from_tool(
         permissions=(f"tool:{definition.name}:{definition.risk.value.lower()}",),
         compatibility=">=0.2.0",
         source="builtin",  # type: ignore[arg-type]
+    )
+
+
+def manifest_from_skill(skill) -> CapabilityManifest:  # type: ignore[no-untyped-def]
+    """把已加载的用户技能转换成 Manifest。
+
+    id 用 `skill.<目录名>`：与内建工具的 `builtin.*`、将来的 `mcp.*`
+    区隔开，用户在能力页一眼能看出"这是我自己写的技能"。
+
+    技能的 permissions 为空：技能不执行任何操作、不访问数据库或网络，
+    它只是给模型的参考资料。把它标成"有权限"会误导用户。
+    """
+    return CapabilityManifest(
+        id=f"skill.{skill.id}",
+        name=skill.name,
+        version=skill.version,
+        type=CapabilityType.SKILL,
+        description=skill.description,
+        # 技能没有参数：模型通过 use_skill 的 skill 参数引用它。
+        input_schema={"type": "object", "properties": {}, "description": "技能无参数"},
+        output_schema={"type": "string", "description": "技能正文（Markdown 文本）"},
+        runtime=CapabilityRuntime.BUILTIN,
+        permissions=(),
+        compatibility=">=0.2.0",
+        source=CapabilitySource.INSTALLED,
     )

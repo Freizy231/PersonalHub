@@ -103,6 +103,15 @@ class Settings:
     def db_path(self) -> Path:
         return self.data_dir / "db" / "personal-hub.db"
 
+    @property
+    def skills_dir(self) -> Path:
+        """用户技能目录（AGENT.md §5.3 数据目录约定）。
+
+        每个技能一个子目录，里面放 SKILL.md。目录不存在时视为"没有技能"，
+        不会自动创建——避免在用户不知情时往数据目录里塞东西。
+        """
+        return self.data_dir / "skills"
+
     @classmethod
     def from_env(cls) -> Settings:
         return cls(

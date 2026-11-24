@@ -31,6 +31,7 @@ from app.ai.openai_compatible import OpenAICompatibleProvider
 from app.api.deps import ConversationRepoDep, MessageRepoDep
 from app.capabilities import ToolContext
 from app.capabilities.broker import ToolBroker
+from app.capabilities.skills import build_catalog_block
 from app.core.audit import EgressRecord, record_egress
 from app.core.config import Settings
 from app.core.errors import PublicMessageError
@@ -118,6 +119,25 @@ def build_memory_block(session_factory) -> ChatMessage | None:  # type: ignore[n
             f"{lines}"
         ),
     )
+
+
+def build_skill_block(skill_library) -> ChatMessage | None:  # type: ignore[no-untyped-def]
+    """把已加载的技能目录整理成一条 system 消息（M8 第 3 项）。
+
+    只注入 id + 名称 + 一句话描述，正文由模型按需调用 use_skill 加载
+    （用户选择的方案，见 D-015）。
+
+    安全要点与记忆注入一致（§4.5、§8.4）：
+    - 技能内容属于**数据**，提示中明确声明不得当作指令执行；
+    - 没有技能时不发送空的 system 消息。
+    """
+    if skill_library is None or len(skill_library) == 0:
+        return None
+
+    block = build_catalog_block(skill_library)
+    if not block:
+        return None
+    return ChatMessage(role="system", content=block)
 
 
 def _schedule_extraction(session_factory, provider, model: str, history, conversation_id: str):  # type: ignore[no-untyped-def]
@@ -231,6 +251,13 @@ async def stream_chat(
     memory_block = build_memory_block(session_factory)
     if memory_block is not None:
         chat_messages.insert(0, memory_block)
+
+    # 3) 注入技能目录（只有名称与描述；正文按需由 use_skill 加载）。
+    # 放在记忆之后：记忆是"关于用户的事实"，技能是"可用方法"，
+    # 事实优先进模型视野更合理。
+    skill_block = build_skill_block(getattr(request.app.state, "skill_library", None))
+    if skill_block is not None:
+        chat_messages.insert(0, skill_block)
 
     request_id = getattr(request.state, "request_id", None)
     egress_base = EgressRecord(
