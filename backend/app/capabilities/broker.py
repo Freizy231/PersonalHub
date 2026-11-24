@@ -21,7 +21,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.capabilities import (
@@ -58,12 +58,21 @@ class ToolResult:
 
 @dataclass(frozen=True, slots=True)
 class ApprovalRequest:
-    """需要用户确认时，交给调用方的信息（用于 SSE 展示）。"""
+    """需要用户确认时，交给调用方的信息（用于 SSE 展示）。
+
+    同时给出三种粒度，界面按需选用（D-012）：
+    - title / summary：给人看的自然语言；
+    - preview：多行摘要文本（兼容只显示文本的旧界面）；
+    - arguments：原始参数，供"查看原始参数"折叠区核对。
+    """
 
     approval_id: str
     tool_name: str
     preview: str
     expires_in_seconds: int
+    title: str = ""
+    summary: tuple[tuple[str, str], ...] = ()
+    arguments: dict[str, Any] = field(default_factory=dict)
 
 
 # 调用方提供：给定审批信息，等待用户决定，返回是否批准。
@@ -88,6 +97,10 @@ class ToolBroker:
         self._session_factory = session_factory
         self._approval_resolver = approval_resolver
         self._session_grants = session_grants
+
+    def definition_of(self, name: str) -> ToolDefinition | None:
+        """按名字取工具定义（用于展示中文名等元数据，不授予任何执行能力）。"""
+        return self._registry.get(name)
 
     async def execute(
         self,
@@ -178,6 +191,7 @@ class ToolBroker:
                 principal_id=principal_id,
                 workspace_id=context.workspace_id,
                 conversation_id=context.conversation_id,
+                definition=definition,
             )
             approval_id = approval.id
             preview = approval.arguments_preview
@@ -188,6 +202,9 @@ class ToolBroker:
                 tool_name=name,
                 preview=preview,
                 expires_in_seconds=int(DEFAULT_TTL.total_seconds()),
+                title=definition.title,
+                summary=tuple(definition.summarize_arguments(arguments)),
+                arguments=arguments,
             )
         )
 

@@ -190,7 +190,11 @@ async def stream_chat(
                 "kind": "approval_required",
                 "approval_id": req.approval_id,
                 "tool": req.tool_name,
+                "title": req.title or req.tool_name,
+                # 摘要已是「标签 + 值」的纯文本，不是 JSON（D-012）。
+                "summary": [{"label": label, "value": value} for label, value in req.summary],
                 "preview": req.preview,
+                "arguments": req.arguments,
                 "expires_in": req.expires_in_seconds,
             }
         )

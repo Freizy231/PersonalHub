@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -62,20 +61,52 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def build_preview(tool_name: str, arguments: dict[str, Any]) -> str:
+def build_preview(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    definition=None,  # type: ignore[no-untyped-def]
+) -> str:
     """生成给用户看的参数摘要。
+
+    输出是**自然语言式的行文本**，不是 JSON（D-012）：
+        标题：学习 Python
+        说明：先掌握基础语法…
+
+    为什么不再输出 `create_task {"title": "..."}`：审批卡片是给人看的，
+    括号、引号和转义字符只会增加阅读负担；长描述被截断时还会切在 JSON
+    中间，变成半截乱码。
 
     只展示参数内容本身（用户需要看清"要做什么"），
     不写入日志（§7.4：日志不记录完整敏感内容）。
     """
-    try:
-        text = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
-    except (TypeError, ValueError):
-        text = "<无法序列化的参数>"
-    preview = f"{tool_name} {text}"
-    if len(preview) > MAX_PREVIEW:
-        preview = preview[:MAX_PREVIEW] + "…"
-    return preview
+    if definition is not None:
+        pairs = definition.summarize_arguments(arguments)
+        title = definition.title
+    else:
+        # 没有工具定义时（例如直接调用本函数的测试/迁移脚本）退回可读的兜底：
+        # 逐行 `键：值`，仍然不输出 JSON 结构。
+        from app.capabilities import humanize_value
+
+        pairs = [(key, humanize_value(value)) for key, value in arguments.items()]
+        title = tool_name
+
+    if not pairs:
+        return f"{title}（无参数）"
+
+    lines = [f"{label}：{value}" for label, value in pairs if value]
+    text = "\n".join(lines) if lines else f"{title}（无参数）"
+    if len(text) > MAX_PREVIEW:
+        # 按行截断：宁可少显示最后一整行，也不切断句子。
+        kept: list[str] = []
+        used = 0
+        for line in lines:
+            if used + len(line) + 1 > MAX_PREVIEW - 1:
+                break
+            kept.append(line)
+            used += len(line) + 1
+        text = "\n".join(kept) + "\n…"
+    return text
 
 
 def create_pending(
@@ -87,12 +118,16 @@ def create_pending(
     workspace_id: str,
     conversation_id: str | None,
     ttl: timedelta = DEFAULT_TTL,
+    definition=None,  # type: ignore[no-untyped-def]
 ) -> Approval:
-    """创建待审批记录，状态 PENDING。"""
+    """创建待审批记录，状态 PENDING。
+
+    definition 是工具定义；提供时会用它生成人类可读摘要与中文工具名。
+    """
     approval = Approval(
         tool_name=tool_name,
         arguments_fingerprint=arguments_fingerprint(tool_name, arguments),
-        arguments_preview=build_preview(tool_name, arguments),
+        arguments_preview=build_preview(tool_name, arguments, definition=definition),
         status=ApprovalStatus.PENDING.value,
         principal_id=principal_id,
         workspace_id=workspace_id,

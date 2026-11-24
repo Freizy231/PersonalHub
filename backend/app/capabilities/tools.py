@@ -81,6 +81,8 @@ def build_search_memories(session_factory) -> ToolDefinition:  # type: ignore[no
         parameters=schema,
         risk=RiskLevel.READ,
         handler=handler,
+        display_name="检索记忆",
+        argument_labels=(("query", "关键词"), ("limit", "最多条数")),
     )
 
 
@@ -234,6 +236,9 @@ def build_create_task(session_factory) -> ToolDefinition:  # type: ignore[no-unt
         parameters=schema,
         risk=RiskLevel.WRITE,
         handler=handler,
+        display_name="创建任务",
+        # 审批卡片据此显示「标题：…」「说明：…」，而不是 JSON（D-012）。
+        argument_labels=(("title", "标题"), ("description", "说明")),
     )
 
 
@@ -283,6 +288,8 @@ def build_list_tasks(session_factory) -> ToolDefinition:  # type: ignore[no-unty
         parameters=schema,
         risk=RiskLevel.READ,
         handler=handler,
+        display_name="查看任务",
+        argument_labels=(("status", "状态"), ("limit", "最多条数")),
     )
 
 

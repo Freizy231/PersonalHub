@@ -59,9 +59,62 @@ class ToolDefinition:
     parameters: dict[str, object]
     risk: RiskLevel
     handler: ToolHandler = field(repr=False)
+    # 给用户看的工具名（"创建任务"）。审批卡片用它，而不是内部标识 create_task。
+    display_name: str = ""
+    # 参数名 -> 中文标签。审批摘要据此输出"标题：…"，而不是 JSON 键值对。
+    argument_labels: tuple[tuple[str, str], ...] = ()
 
     def to_spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
+
+    @property
+    def title(self) -> str:
+        """面向用户的名称。没声明时退回内部名称（仍然不是 JSON）。"""
+        return self.display_name or self.name
+
+    def summarize_arguments(self, arguments: dict[str, Any]) -> list[tuple[str, str]]:
+        """把参数翻译成「标签 + 值」列表，供审批界面展示。
+
+        刻意不输出 JSON 结构：审批是给人看的，`{"title": "..."}` 只会让用户
+        去解析括号和引号（见 docs/DECISIONS.md D-012）。
+        未知参数用原始键名兜底，保证将来新增工具时不会退化成 JSON。
+        """
+        labels = dict(self.argument_labels)
+        summary: list[tuple[str, str]] = []
+        for key, value in arguments.items():
+            text = humanize_value(value)
+            if text:
+                summary.append((labels.get(key, key), text))
+        return summary
+
+
+def humanize_value(value: Any, *, limit: int = 200) -> str:
+    """把任意参数值转成可读的一行文本。
+
+    - 列表用顿号连接（"a、b、c"），而不是 `["a","b"]`。
+    - 布尔显示为是/否，None 省略。
+    - 过长的文本截断并加省略号，避免一条描述挤满整张卡片。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        text = "是" if value else "否"
+    elif isinstance(value, str):
+        text = value.strip()
+    elif isinstance(value, (list, tuple)):
+        parts = [humanize_value(item, limit=limit) for item in value]
+        text = "、".join(part for part in parts if part)
+    elif isinstance(value, dict):
+        pairs = [
+            f"{key}={humanize_value(item, limit=limit)}" for key, item in value.items() if item
+        ]
+        text = "；".join(pairs)
+    else:
+        text = str(value)
+
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return text
 
 
 class ToolRegistry:
