@@ -278,3 +278,37 @@ export interface PluginPreview {
   tools: PluginTool[]
   warnings: string[]
 }
+
+/** 生成的 Personal App（M9）。 */
+export interface AppInfo {
+  id: string
+  name: string
+  version: string | null
+  versions: string[]
+  installed_at: string
+  description: string
+  ok: boolean
+}
+
+export interface AppList {
+  items: AppInfo[]
+  total: number
+}
+
+/** 一次生成的结果（尚未安装）。 */
+export interface StagedApp {
+  staging_id: string
+  app_id: string
+  title: string
+  purpose: string
+  elements: string[]
+  capability: string
+  size_bytes: number
+  generated_at: string
+}
+
+export interface InstallResult {
+  ok: boolean
+  app: AppInfo
+  message: string
+}

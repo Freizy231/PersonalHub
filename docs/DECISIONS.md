@@ -997,3 +997,89 @@ provider / model / 字符数 / 结果，**不记录描述正文**（同 D-004 �
 
 **回滚**：删除 `app/api/apps.py`、`tests/test_apps_api.py`，回退 `main.py` 的两处接线、
 `config.py` 的 `builder_dir`。无数据库迁移，无新增依赖。
+
+## D-023：M9 第 5–6 步——应用中心界面与真实浏览器验收
+
+- 日期：2026-11-24
+- 状态：已实施（第 6 步的验收脚本已跑通；第 7 步文档在本条之后）
+- 规范条款：§4.15 System Builder、§4.5 前后端边界、§9.2 测试要求
+
+**本期范围**：前端「应用」页 + 真实浏览器验证沙箱边界。
+
+```
+frontend/src/pages/AppsPage.tsx        生成 / 预览 / 安装 / 回滚 / 卸载
+frontend/src/services/api.ts           apps.* 客户端（生成超时 3 分钟）
+scripts/verify-app-sandbox.mjs         无头浏览器验证边界
+scripts/sandbox_probe_app.html         故意越界的探针应用
+backend/tests/test_apps_sandbox.py     把上述脚本纳入 pytest
+```
+
+**预览为什么用 iframe 的 `src`，而不是取 HTML 塞进 `srcDoc`**
+
+取文本再 `srcDoc` 最省事，但那样**丢掉了后端的 CSP**：CSP 是随 HTTP 响应头
+下发的，`srcDoc` 的内容没有响应头。于是"应用不能联网"就只剩 iframe 的
+`sandbox` 一层——纵深防御的一半被自己废掉了。
+
+代价是前端拿不到应用内容（无法在页面上做摘要）。这是有意的取舍：
+摘要用后端返回的 `StagedAppOut`，内容只经 iframe 加载。
+
+**`sandbox="allow-scripts"` 是唯一授权项**
+
+不加 `allow-same-origin`，iframe 就是不透明来源（实测 `window.origin === null`）。
+加上的话，同源页面里的应用就能读父 DOM、用 localStorage、调后端 API——
+那等于把第三方代码请进内核（提案 §3 方案 C 被否决的正是这条路）。
+
+**实测结果（Edge 154 无头，2026-11-24）**
+
+用一个**故意越界**的探针应用验证（`scripts/sandbox_probe_app.html`）。
+注意：它被直接装进 AppStore，绕过了静态检查——这是故意的，
+要验证的正是"第一层失效时第二层是否仍然有效"。
+
+| 应用的尝试 | 实测结果 |
+|---|---|
+| `window.parent.document.title` | `SecurityError`（origin "null" 跨源） |
+| `localStorage.getItem()` | `SecurityError`（缺少 allow-same-origin） |
+| `document.cookie` | `SecurityError`（同上） |
+| `window["fe"+"tch"]("http://example.com/secret")` | `TypeError`（CSP 阻断） |
+| 应用自己的按钮/计时器 | **正常运行**（allow-scripts 生效） |
+
+外部请求在 CDP 网络记录里**一条都没有**。同时截图确认：
+以 1000px 与 390px 宽度打开「应用」页，布局正常，应用在自己的画布内渲染。
+
+**把浏览器验证放进 pytest，而不是只留一份手工记录**
+
+`tests/test_apps_sandbox.py` 起一个真实监听端口的服务，再调用
+`scripts/verify-app-sandbox.mjs`（`--embed` 模式），断言五项全部被拦。
+没有 Node 或没有浏览器时**跳过**而不是失败——无法给出结论时，
+失败会误导成"边界破了"。
+
+脚本的 `--embed` 模式会注入与 `AppsPage` **属性完全相同**的 iframe
+（sandbox、referrerPolicy）。如果以后前端放宽了 sandbox 而脚本没跟上，
+测试会通过但界面不安全。为此在脚本里注明：这些属性是**写死**的，
+改前端时必须同步改这里。
+
+**过程中发现并修掉的问题**
+
+1. **静态检查漏掉内联事件处理器**（第 3 步发现）：`onclick="fetch(...)"`
+   直接放行。已把 `on*` 属性并入检查。
+2. **提示文字用了 Markdown 的 `**`**：它是纯文本 `<p>`，星号原样显示。
+   改为 `<strong>`。
+3. **窄屏导航被拆成两行**（「应/用」逐字换行）：中文字符默认任意位置断行。
+   导航加 `white-space: nowrap` + 容器 `flex-wrap: wrap`。
+4. **CSP 补 `frame-ancestors 'self'`**：阻止本机其它网页把用户的应用嵌进去
+   （例如钓鱼页里套一个看似无害的"计算器"）。
+5. **生成超时**：两次模型调用的总耗时常超过默认的 8 秒。
+   生成请求单独放宽到 3 分钟，界面上给出"正在生成"提示。
+
+**已知限制**
+
+- iframe 无法限制 CPU/内存。方案是**生成期限制**（复杂度 + 大小上限）
+  而非运行期限额；一个死循环的应用会卡住自己的 iframe，不影响主界面
+  （不同进程），但会占 CPU。这是 v1 接受的限制，记入技术债。
+- 生成是同步请求，期间用户只能等待。若改为后台作业，可复用 M8 的作业队列。
+- 应用的摘要在安装后无法再改（名称、描述来自生成时的需求）。
+
+**回滚**：删除 `AppsPage.tsx`、`scripts/verify-app-sandbox.mjs`、
+`scripts/sandbox_probe_app.html`、`tests/test_apps_sandbox.py`，
+回退 `App.tsx` 的路由与导航、`api.ts` 的 apps 段、`index.css` 的应用中心段。
+无数据库迁移，无新增依赖（浏览器验证只用 Node 内置能力）。

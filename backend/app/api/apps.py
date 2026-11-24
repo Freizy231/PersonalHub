@@ -66,7 +66,11 @@ APP_SECURITY_HEADERS = {
         "img-src data:; "
         "connect-src 'none'; "
         "base-uri 'none'; "
-        "form-action 'none'"
+        "form-action 'none'; "
+        # 只允许**本应用**的页面被同源的界面嵌入。开发时经 Vite 代理，
+        # 生产时前端由后端同源提供，两者都满足；同时阻止本机其它网页
+        # 把用户的应用嵌进去（例如钓鱼页里套一个"计算器"）。
+        "frame-ancestors 'self'"
     ),
     "X-Content-Type-Options": "nosniff",
     "Cross-Origin-Resource-Policy": "same-origin",
@@ -109,6 +113,13 @@ class AppOut(BaseModel):
     installed_at: str
     description: str
     ok: bool
+
+
+class AppListOut(BaseModel):
+    """与其他列表接口保持一致的结构（items + total）。"""
+
+    items: list[AppOut]
+    total: int
 
 
 class InstallOut(BaseModel):
@@ -159,9 +170,10 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-@router.get("", response_model=list[AppOut], summary="列出应用")
-async def list_apps(request: Request) -> list[AppOut]:
-    return [_to_out(app) for app in _store(request).list_apps()]
+@router.get("", response_model=AppListOut, summary="列出应用")
+async def list_apps(request: Request) -> AppListOut:
+    items = [_to_out(app) for app in _store(request).list_apps()]
+    return AppListOut(items=items, total=len(items))
 
 
 @router.post("/generate", response_model=StagedAppOut, summary="生成应用（不安装）")

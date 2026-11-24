@@ -1,6 +1,7 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 
 import { ActivityCenterPage } from './pages/ActivityCenterPage'
+import { AppsPage } from './pages/AppsPage'
 import { CapabilityCenterPage } from './pages/CapabilityCenterPage'
 import { ConversationDetailPage } from './pages/ConversationDetailPage'
 import { ConversationsPage } from './pages/ConversationsPage'
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { to: '/activity', label: '活动', end: false },
   { to: '/capabilities', label: '能力', end: false },
   { to: '/plugins', label: '插件', end: false },
+  { to: '/apps', label: '应用', end: false },
 ]
 
 export default function App() {
@@ -58,6 +60,7 @@ export default function App() {
           <Route path="/activity/:jobId" element={<ActivityCenterPage />} />
           <Route path="/capabilities" element={<CapabilityCenterPage />} />
           <Route path="/plugins" element={<PluginCenterPage />} />
+          <Route path="/apps" element={<AppsPage />} />
           <Route
             path="*"
             element={
@@ -73,7 +76,7 @@ export default function App() {
 
         <footer className="app__footer">
           <p>
-            当前处于 <strong>M8 — 能力运行时</strong> 阶段（已交付 Manifest 与能力注册表）。
+            当前处于 <strong>M9 — 系统构建器</strong> 阶段（已可用自然语言生成小应用）。
           </p>
           <p>数据默认留在本机，服务只监听回环地址。</p>
         </footer>

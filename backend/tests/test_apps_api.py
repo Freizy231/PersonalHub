@@ -80,7 +80,7 @@ def _generate(client: TestClient, request: str = "做一个待办清单") -> dic
 
 class TestListEmpty:
     def test_no_apps(self, app_client: TestClient) -> None:
-        assert app_client.get(f"{API}/apps").json() == []
+        assert app_client.get(f"{API}/apps").json()["items"] == []
 
 
 class TestGenerate:
@@ -96,7 +96,7 @@ class TestGenerate:
     def test_generated_app_is_not_installed_yet(self, app_client: TestClient) -> None:
         _generate(app_client)
 
-        assert app_client.get(f"{API}/apps").json() == []
+        assert app_client.get(f"{API}/apps").json()["items"] == []
 
     def test_preview_content_has_security_headers(self, app_client: TestClient) -> None:
         body = _generate(app_client)
@@ -110,6 +110,7 @@ class TestGenerate:
         assert "default-src 'none'" in csp
         assert "connect-src 'none'" in csp
         assert "form-action 'none'" in csp
+        assert "frame-ancestors 'self'" in csp
         assert headers["x-content-type-options"] == "nosniff"
         assert headers["cache-control"] == "no-store"
         assert headers["cross-origin-resource-policy"] == "same-origin"
@@ -179,7 +180,7 @@ class TestInstall:
         assert app["name"] == "待办清单"
         assert app["version"] == "1.0.0"
         assert app["ok"] is True
-        assert len(app_client.get(f"{API}/apps").json()) == 1
+        assert app_client.get(f"{API}/apps").json()["total"] == 1
 
     def test_install_discards_staging(self, app_client: TestClient) -> None:
         staged = _generate(app_client)
@@ -212,7 +213,7 @@ class TestInstall:
         app = response.json()["app"]
         assert app["version"] == "1.0.1"
         assert app["versions"] == ["1.0.0", "1.0.1"]
-        assert len(app_client.get(f"{API}/apps").json()) == 1
+        assert app_client.get(f"{API}/apps").json()["total"] == 1
 
     def test_unknown_staging_id(self, app_client: TestClient) -> None:
         response = app_client.post(f"{API}/apps/staging/nosuchid/install")
@@ -271,7 +272,7 @@ class TestUninstall:
 
         assert response.status_code == 200
         assert "保留" in response.json()["message"]
-        assert app_client.get(f"{API}/apps").json() == []
+        assert app_client.get(f"{API}/apps").json()["items"] == []
         assert (settings.builder_dir / "apps" / f".{app_id}.uninstalled").is_dir()
 
     def test_uninstall_unknown(self, app_client: TestClient) -> None:

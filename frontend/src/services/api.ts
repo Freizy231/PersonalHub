@@ -10,6 +10,9 @@
 
 import type {
   ActivityList,
+  AppList,
+  InstallResult,
+  StagedApp,
   ApiErrorBody,
   Approval,
   ApprovalList,
@@ -126,6 +129,12 @@ async function request<T>(
   }
 }
 
+/**
+ * 生成可能很慢（两次模型调用），用它避免 8 秒默认超时误报失败。
+ * 仍然有上限：卡住时用户能明确看到失败，而不是无限等待。
+ */
+const GENERATE_TIMEOUT_MS = 180_000
+
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
@@ -227,6 +236,55 @@ export const api = {
   mcp: {
     /** 只读：MCP Server 的配置与状态。增删改需直接编辑配置文件并重启。 */
     servers: () => request<McpServerList>('/mcp/servers'),
+  },
+
+  /**
+   * 生成的 Personal App（M9）。
+   *
+   * 预览与运行都通过 iframe 加载 `/apps/.../content`：那条路径带
+   * CSP `default-src 'none'` 等安全响应头，是应用唯一的运行方式。
+   * 这里刻意不取 HTML 文本再塞进 srcDoc——reason 见 AppsPage 注释。
+   */
+  apps: {
+    list: () => request<AppList>('/apps'),
+
+    generate: (prompt: string) =>
+      request<StagedApp>('/apps/generate', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ request: prompt }),
+        timeoutMs: GENERATE_TIMEOUT_MS,
+      }),
+
+    staged: (stagingId: string) =>
+      request<{ staging_id: string; html: string; title: string; size_bytes: number }>(
+        `/apps/staging/${encodeURIComponent(stagingId)}`,
+      ),
+
+    install: (stagingId: string) =>
+      request<InstallResult>(`/apps/staging/${encodeURIComponent(stagingId)}/install`, {
+        method: 'POST',
+      }),
+
+    discard: (stagingId: string) =>
+      request<{ ok: boolean; message: string }>(
+        `/apps/staging/${encodeURIComponent(stagingId)}`,
+        { method: 'DELETE' },
+      ),
+
+    rollback: (id: string) =>
+      request<InstallResult>(`/apps/${encodeURIComponent(id)}/rollback`, { method: 'POST' }),
+
+    remove: (id: string) =>
+      request<{ ok: boolean; message: string }>(`/apps/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+
+    /** iframe 的 src。不要 fetch 它再把结果塞进 srcDoc——见 AppsPage 注释。 */
+    contentUrl: (id: string) => `${API_PREFIX}/apps/${encodeURIComponent(id)}/content`,
+
+    stagingContentUrl: (stagingId: string) =>
+      `${API_PREFIX}/apps/staging/${encodeURIComponent(stagingId)}/content`,
   },
 
   capabilities: {

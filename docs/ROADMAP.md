@@ -401,10 +401,25 @@ M7 未交付（理由）：
 - [x] 不提供下载接口（应用不能脱离沙箱被本地打开）
 - [x] 后端 789 项测试（本步新增 22 项接口测试 + 4 项 staging 测试）
 
+第五步：前端应用中心（2026-11-24）
+- [x] `AppsPage`：生成 → 预览 → 安装 → 回滚 → 卸载
+- [x] 预览用 iframe `src` 而非 `srcDoc`，以保住后端 CSP
+- [x] `sandbox="allow-scripts"`，不加 `allow-same-origin`（不透明来源）
+- [x] 生成请求单独放宽超时（3 分钟），并显示进度提示
+- [x] 实测修正：提示文字误用 Markdown、窄屏导航逐字换行
+
+第六步：真实浏览器验收沙箱边界（2026-11-24）
+- [x] `scripts/verify-app-sandbox.mjs`：无头 Edge/Chrome + CDP，零新依赖
+- [x] 探针应用**故意越界**（直接装进 AppStore，绕过静态检查）
+- [x] 实测：父页面 / localStorage / cookie 均 `SecurityError`，
+      `window["fe"+"tch"]` 被 CSP 阻断，外部请求记录为零
+- [x] 应用自身脚本正常运行（计时器可开始、暂停、重置）
+- [x] 纳入 pytest（`test_apps_sandbox.py`），环境不具备时跳过
+- [x] CSP 补 `frame-ancestors 'self'`
+- [x] 后端 790 项测试
+
 未开始：
-- [ ] 第 5 步 前端：应用列表页 + 沙箱预览页
-- [ ] 第 6 步 集成测试（真实浏览器验证沙箱边界）
-- [ ] 第 7 步 文档 D-020
+- [ ] 第 7 步 文档收尾（D-020 系列已完成，最后汇总里程碑状态）
 
 
 ## 阶段 D
