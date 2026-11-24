@@ -1856,3 +1856,270 @@ a.button:hover {
 .mcp__toolnames code {
   font-size: 0.76rem;
 }
+
+/* ---------- 插件中心（M8） ---------- */
+
+.plugin-center {
+  margin-top: 28px;
+}
+
+.plugin-center__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plugin-center__header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.plugin-center__count {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.plugin-center__notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+  border-radius: 8px;
+}
+
+.plugin-center__empty {
+  margin: 24px 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.alert--info {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text);
+}
+
+.plugin-installer {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.plugin-installer h3 {
+  margin: 0 0 6px;
+  font-size: 0.96rem;
+}
+
+.plugin-installer__hint {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.plugin-installer__form {
+  display: flex;
+  gap: 8px;
+}
+
+.plugin-installer__form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.plugin-preview {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: 8px;
+}
+
+.plugin-preview__title {
+  margin: 0 0 6px;
+  font-size: 0.92rem;
+}
+
+.plugin-preview__desc {
+  margin: 0 0 10px;
+  font-size: 0.86rem;
+  color: var(--text-muted);
+}
+
+.plugin-preview__row {
+  display: flex;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+
+.plugin-preview__label {
+  flex: none;
+  width: 3em;
+  color: var(--text-muted);
+}
+
+.plugin-preview__tools {
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+.plugin-preview__tools li {
+  margin-bottom: 4px;
+}
+
+.plugin-tool__risk {
+  margin-left: 8px;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  border-radius: 8px;
+}
+
+.plugin-tool__risk--read {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.plugin-tool__risk--write {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--warn);
+}
+
+.plugin-tool__composes {
+  display: block;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+}
+
+.plugin-preview__warnings {
+  margin: 10px 0 0;
+  padding-left: 1.2em;
+  font-size: 0.82rem;
+  color: var(--warn);
+}
+
+.plugin-preview__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.plugin-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plugin {
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 10px;
+}
+
+.plugin--enabled {
+  border-left-color: var(--ok);
+}
+
+.plugin--broken {
+  border-left-color: var(--err);
+}
+
+.plugin__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.plugin__name {
+  font-weight: 600;
+  font-size: 0.96rem;
+}
+
+.plugin__id {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.plugin__version {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.plugin__status {
+  margin-left: auto;
+  padding: 1px 9px;
+  font-size: 0.74rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--border) 50%, transparent);
+  color: var(--text-muted);
+}
+
+.plugin__status--on {
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+  color: var(--ok);
+}
+
+.plugin__status--broken {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
+}
+
+.plugin__error {
+  margin: 8px 0;
+  font-size: 0.82rem;
+  color: var(--err);
+}
+
+.plugin__desc {
+  margin: 8px 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.plugin__tools {
+  margin: 6px 0;
+  padding-left: 1.1em;
+  font-size: 0.84rem;
+}
+
+.plugin__permissions {
+  margin: 6px 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.plugin__permissions em {
+  color: var(--warn);
+  font-style: normal;
+}
+
+.plugin__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.plugin__confirm-text {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+@media (max-width: 520px) {
+  .plugin-installer__form {
+    flex-direction: column;
+  }
+}

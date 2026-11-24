@@ -6,6 +6,7 @@ import { ConversationDetailPage } from './pages/ConversationDetailPage'
 import { ConversationsPage } from './pages/ConversationsPage'
 import { HomePage } from './pages/HomePage'
 import { MemoryCenterPage } from './pages/MemoryCenterPage'
+import { PluginCenterPage } from './pages/PluginCenterPage'
 import { TaskCenterPage } from './pages/TaskCenterPage'
 
 /** 导航只列出已实现的页面，避免死链接（AGENT.md：不提前创建空模块）。 */
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { to: '/tasks', label: '任务', end: false },
   { to: '/activity', label: '活动', end: false },
   { to: '/capabilities', label: '能力', end: false },
+  { to: '/plugins', label: '插件', end: false },
 ]
 
 export default function App() {
@@ -55,6 +57,7 @@ export default function App() {
           <Route path="/activity" element={<ActivityCenterPage />} />
           <Route path="/activity/:jobId" element={<ActivityCenterPage />} />
           <Route path="/capabilities" element={<CapabilityCenterPage />} />
+          <Route path="/plugins" element={<PluginCenterPage />} />
           <Route
             path="*"
             element={

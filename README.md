@@ -91,7 +91,64 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - **能力页**（导航「能力」）：列出系统已有的能力，可搜索、按类型筛选、
   展开参数结构
 - **声明不等于授权**：页面上明确标注"声明，非授权"，写操作仍需你确认
-- 尚未交付：隔离插件、安装/卸载（M8 第 6–8 项）
+- 尚未交付：进程插件（沙箱）、WASM 评估（M8 第 6b/7b/8 项）
+
+#### 插件（声明式）
+
+插件可以把你常用的工具组合固定下来。**本期插件不含任何可执行代码**，
+只是"依次调用哪些已有工具"的声明。
+
+安装步骤：
+
+```bash
+# 1. 把插件目录放进导入目录
+mkdir -p ~/.local/share/personal-hub/plugin-import/notes-plugin
+# 2. 写入 plugin.json（见下）
+# 3. 打开「插件」页 → 填目录名 → 预览 → 确认安装 → 启用
+```
+
+`plugin.json` 示例：
+
+```json
+{
+  "id": "com.example.notes",
+  "name": "笔记助手",
+  "version": "1.0.0",
+  "type": "declarative",
+  "description": "把文本整理成一条任务",
+  "permissions": ["task:write"],
+  "tools": [
+    {
+      "name": "make_todo",
+      "display_name": "生成任务",
+      "description": "把一段文本创建为任务",
+      "input_schema": {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"]
+      },
+      "composes": ["builtin.create_task"],
+      "argument_labels": [["title", "标题"]]
+    }
+  ]
+}
+```
+
+规则与安全约定：
+
+| 项 | 要求 |
+|---|---|
+| `id` | 反向域名形式，如 `com.example.notes` |
+| `type` | 只能是 `declarative`（`process` 本期不支持，会明确报错） |
+| `composes` | 只能引用**内建工具**（`builtin.list_tasks` 等），不能引用插件或 MCP |
+| 安装来源 | 只从数据目录的 `plugin-import/<目录名>` 读取，**不接受任意路径** |
+| 默认状态 | 安装后**不启用**，需手动开启 |
+
+- **批准外层不等于批准内层**：调用组合工具时，内部每个写操作都会
+  **单独再要一次确认**。实测会连续弹出两次审批。
+- 组合工具的风险 = 所组合工具中的最高风险（含写操作就需要确认）。
+- 卸载**保留文件**（重命名为 `.<id>.uninstalled`），可手动删除。
+- 安装时拒绝包含符号链接的目录。
 
 #### 外部 MCP 服务
 
@@ -267,14 +324,15 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（545 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# 后端测试（608 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
 # workspace 隔离、role 伪造防护、流式对话、取消语义（含断开即停止生成）、
 # 历史取尾部、外发审计、代理处理、记忆提取/审核/注入隔离/去重、Agent 循环、
 # 工具 Broker、参数校验、审批人话摘要、审批绑定/过期/一次性消费/越权、
 # Policy 决策、作业队列/重试/恢复/Worker、
 # 能力 Manifest 校验/版本排序/依赖环/声明非授权/只读 API、
 # 技能解析/校验/不执行代码/路径穿越防护/对话注入、
-# MCP 配置校验/命令白名单/失败隔离/一律 WRITE/代理链路/不可信标注）
+# MCP 配置校验/命令白名单/失败隔离/一律 WRITE/代理链路/不可信标注、
+# 插件清单校验/组合风险传播/双层审批/路径逃逸/卸载保留目录）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 

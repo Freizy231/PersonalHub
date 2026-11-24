@@ -25,6 +25,7 @@ from app.api import (
     mcp,
     memory,
     messages,
+    plugins,
 )
 from app.capabilities import ToolRegistry
 from app.capabilities.registry import (
@@ -133,6 +134,54 @@ async def _bootstrap_mcp(app: FastAPI) -> None:
         )
 
 
+def _bootstrap_plugins(app: FastAPI) -> None:
+    """读取已安装插件，把**已启用**的插件工具登记进注册表。
+
+    同步完成：声明式插件只有 JSON，读取很快，不涉及任何外部进程或网络。
+
+    安全约束（§8.5、提案 §4）：
+
+    - 默认不启用：安装时 enabled=False，用户必须显式开启；
+    - 清单不合法 → 永不启用（registry 已保证）；
+    - 组合工具的风险 = 所组合工具的最高风险，内部调用仍各自经 Broker 审批。
+    """
+    from app.plugins.declarative import manifest_for_plugin_tool, register_plugin_tools
+    from app.plugins.registry import PluginRegistry
+
+    settings: Settings = app.state.settings
+    registry = PluginRegistry(root=settings.plugins_dir)
+    registry.load()
+    app.state.plugin_registry = registry
+
+    registered: list[str] = []
+    skipped: list[tuple[str, str]] = []
+
+    for installed in registry.list():
+        if not installed.ok or not installed.enabled:
+            continue
+        manifest = installed.manifest
+        assert manifest is not None
+
+        # 内部调用所用的 Broker 由请求期的 contextvar 提供（见
+        # plugins/declarative.py 的 set_current_broker），因此这里不需要
+        # 绑定任何审批通道。
+        result = register_plugin_tools(manifest, registry=app.state.tool_registry)
+        registered.extend(result.registered)
+        skipped.extend(result.skipped)
+
+        for spec in manifest.tools:
+            name = f"plugin__{spec.name}"
+            if name in result.registered:
+                app.state.capability_registry.register(manifest_for_plugin_tool(manifest, spec))
+
+    app.state.plugin_status = {
+        "registered": registered,
+        "skipped": skipped,
+    }
+    if registered:
+        logger.info("插件工具已登记", extra={"count": len(registered)})
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging()
     settings = settings or get_settings()
@@ -159,6 +208,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 代价是启动会等外部 Server 握手，因此每个 Server 都有超时，
         # 且失败只记日志、不影响启动（外部依赖不能拖垮本地环境）。
         await _bootstrap_mcp(app)
+        _bootstrap_plugins(app)
 
         # 后台 Worker：在应用生命周期内运行，关掉浏览器不影响它。
         # 数据库缺表时 Worker 会持续报错，因此只在表齐全时启动。
@@ -248,6 +298,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(jobs.router, prefix=settings.api_prefix)
     app.include_router(capabilities.router, prefix=settings.api_prefix)
     app.include_router(mcp.router, prefix=settings.api_prefix)
+    app.include_router(plugins.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app

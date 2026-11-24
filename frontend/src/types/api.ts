@@ -235,3 +235,43 @@ export interface McpServerList {
   errors: string[]
   notice: string
 }
+
+/** 插件（M8）。本期为声明式：不含可执行代码。 */
+export interface PluginTool {
+  name: string
+  display_name: string
+  description: string
+  risk_hint: string
+  composes: string[]
+}
+
+export interface Plugin {
+  id: string
+  name: string
+  version: string
+  type: string
+  description: string
+  enabled: boolean
+  installed_at: string
+  permissions: string[]
+  dependencies: string[]
+  tools: PluginTool[]
+  error: string | null
+}
+
+export interface PluginList {
+  items: Plugin[]
+  total: number
+  notice: string
+}
+
+export interface PluginPreview {
+  id: string
+  name: string
+  version: string
+  description: string
+  permissions: string[]
+  dependencies: string[]
+  tools: PluginTool[]
+  warnings: string[]
+}

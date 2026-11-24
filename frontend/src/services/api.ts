@@ -26,6 +26,9 @@ import type {
   MemoryItem,
   MemoryList,
   Message,
+  Plugin,
+  PluginList,
+  PluginPreview,
   MessageList,
   Result,
 } from '../types/api'
@@ -195,6 +198,32 @@ export const api = {
   },
 
   /** 能力声明（M8）。只读：安装与调用需要单独的授权流程，不在此暴露。 */
+  plugins: {
+    list: () => request<PluginList>('/plugins'),
+
+    /** 安装前预览：来源、权限、依赖与风险（§8.5）。 */
+    preview: (directory: string) =>
+      request<PluginPreview>(`/plugins/preview?directory=${encodeURIComponent(directory)}`),
+
+    install: (directory: string) =>
+      request<Plugin>('/plugins/install', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ directory }),
+      }),
+
+    enable: (id: string) =>
+      request<Plugin>(`/plugins/${encodeURIComponent(id)}/enable`, { method: 'POST' }),
+
+    disable: (id: string) =>
+      request<Plugin>(`/plugins/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+
+    remove: (id: string) =>
+      request<{ ok: boolean; message: string }>(`/plugins/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+  },
+
   mcp: {
     /** 只读：MCP Server 的配置与状态。增删改需直接编辑配置文件并重启。 */
     servers: () => request<McpServerList>('/mcp/servers'),

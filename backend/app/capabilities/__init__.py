@@ -147,6 +147,14 @@ class ToolRegistry:
     def get(self, name: str) -> ToolDefinition | None:
         return self._tools.get(name)
 
+    def remove(self, name: str) -> bool:
+        """移除一个已注册工具（M8：禁用插件时使用）。返回是否真的移除了。
+
+        Registry 只负责登记，这里不判断调用方是否有权移除；
+        权限由 API 层控制的插件状态决定。
+        """
+        return self._tools.pop(name, None) is not None
+
     def all(self) -> list[ToolDefinition]:
         return list(self._tools.values())
 

@@ -36,6 +36,7 @@ from app.core.audit import EgressRecord, record_egress
 from app.core.config import Settings
 from app.core.errors import PublicMessageError
 from app.models.conversation import DEFAULT_WORKSPACE_ID
+from app.plugins.declarative import reset_current_broker, set_current_broker
 from app.policy.waiter import get_waiter
 from app.schemas.chat import ChatStreamRequest
 from app.services.memory import approved_memories, extract_candidates, save_candidates
@@ -297,6 +298,10 @@ async def stream_chat(
             loop_events: asyncio.Queue[AgentEvent] = asyncio.Queue()
 
             async def drive_loop() -> None:
+                # 让插件工具在执行时拿到**本请求**的 Broker（含审批通道）。
+                # ContextVar 是任务局部的：同一次请求的 Agent 循环与
+                # 内部插件调用看到同一个 Broker，并发请求之间互不干扰。
+                token = set_current_broker(broker)
                 try:
                     async for item in run_agent_loop(
                         provider=provider,
@@ -329,6 +334,7 @@ async def stream_chat(
                         )
                     )
                 finally:
+                    reset_current_broker(token)
                     await loop_events.put(_LOOP_FINISHED)  # type: ignore[arg-type]
 
             loop_task = asyncio.create_task(drive_loop())

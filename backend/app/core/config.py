@@ -113,6 +113,15 @@ class Settings:
         return self.data_dir / "skills"
 
     @property
+    def plugins_dir(self) -> Path:
+        """插件目录（M8 第 6–7 项）。
+
+        每个插件一个子目录；卸载时目录被重命名为 `.<id>.uninstalled`
+        而**不删除**，保留用户可能的配置。
+        """
+        return self.data_dir / "plugins"
+
+    @property
     def mcp_dir(self) -> Path:
         """MCP 配置与子进程工作目录（M8 第 4 项）。
 
