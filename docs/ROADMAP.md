@@ -463,6 +463,11 @@ M7 未交付（理由）：
 - [ ] **仍未做**：统一组件体系（复杂度第 3 级）
 
 
+## 规范中未归入里程碑、但已完成的工作
+
+- [x] Context Engine（§4.5）：记忆按相关性排序、去重、预算、来源标注（D-028）
+- [x] Settings 页面（§2.5 第 6 项）：只读配置展示（D-029）
+
 ## 阶段 D：Personal Hub Ecosystem（M10）
 
 ### M10 — Local Sync, Export & Community — 提案待批准

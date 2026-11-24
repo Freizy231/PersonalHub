@@ -486,3 +486,48 @@ class TestSensitivityField:
         _send(client, cid)
 
         assert "年薪" in "\n".join(m.content for m in provider.calls[0])
+
+
+class TestContextIntegration:
+    """记忆 → Context Engine 的衔接（§4.5）。
+
+    引擎是纯函数；"从哪张表取、取哪些状态"在这一层验证。
+    """
+
+    def test_only_approved_reach_engine(self, session) -> None:
+        from app.models.memory import MemoryItem, MemoryStatus
+        from app.services.memory import approved_memory_candidates
+
+        session.add(
+            MemoryItem(content="已批准：我偏好项目驱动", fingerprint="f1",
+                       status=MemoryStatus.APPROVED.value, confidence=80)
+        )  # fmt: skip
+        session.add(
+            MemoryItem(content="候选：模型猜的", fingerprint="f2",
+                       status=MemoryStatus.PROPOSED.value)
+        )  # fmt: skip
+        session.commit()
+
+        candidates = approved_memory_candidates(session, "default")
+
+        assert [c.content for c in candidates] == ["已批准：我偏好项目驱动"]
+
+    def test_candidate_carries_ranking_fields(self, session) -> None:
+        from app.models.memory import MemoryItem, MemorySource, MemoryStatus
+        from app.services.memory import approved_memory_candidates
+
+        item = MemoryItem(
+            content="我偏好项目驱动", fingerprint="f1",
+            status=MemoryStatus.APPROVED.value, confidence=77, kind="PROCEDURAL",
+        )  # fmt: skip
+        session.add(item)
+        session.flush()
+        session.add(MemorySource(memory_id=item.id, source_type="conversation", source_id="c1"))
+        session.commit()
+
+        candidate = approved_memory_candidates(session, "default")[0]
+
+        assert candidate.confidence == 77
+        assert candidate.kind == "PROCEDURAL"
+        assert candidate.source_count == 1
+        assert candidate.updated_at is not None

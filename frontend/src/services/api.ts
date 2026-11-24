@@ -13,6 +13,7 @@ import type {
   AppList,
   GenerateAccepted,
   InstallResult,
+  SettingsView,
   ApiErrorBody,
   Approval,
   ApprovalList,
@@ -307,6 +308,11 @@ export const api = {
       request<CapabilityList>(`/capabilities/${encodeURIComponent(id)}/versions`),
 
     dependencyHealth: () => request<DependencyHealth>('/capabilities/health/deps'),
+  },
+
+  /** 系统设置（只读）：当前进程真正在用的配置。 */
+  settings: {
+    get: () => request<SettingsView>('/settings'),
   },
 
   approvals: {

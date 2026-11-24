@@ -28,6 +28,9 @@ from app.api import (
     messages,
     plugins,
 )
+from app.api import (
+    settings as settings_api,
+)
 from app.capabilities import ToolRegistry
 from app.capabilities.registry import (
     CapabilityRegistry,
@@ -359,6 +362,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(capabilities.router, prefix=settings.api_prefix)
     app.include_router(mcp.router, prefix=settings.api_prefix)
     app.include_router(plugins.router, prefix=settings.api_prefix)
+    app.include_router(settings_api.router, prefix=settings.api_prefix)
     app.include_router(apps.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 

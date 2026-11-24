@@ -339,3 +339,45 @@ export interface InstallResult {
   app: AppInfo
   message: string
 }
+
+/** 系统设置（只读）。配置只能通过环境变量 + 重启修改。 */
+export interface SettingsView {
+  provider: {
+    name: string
+    model: string
+    base_url: string
+    api_key_env: string
+    /** 只告诉"有没有配"，永远不回传密钥本身。 */
+    api_key_configured: boolean
+    ready: boolean
+    hint: string
+  }
+  data: {
+    data_dir: string
+    db_path: string
+    db_size_bytes: number
+    free_disk_bytes: number
+  }
+  memory_policy: {
+    requires_approval: boolean
+    only_approved_injected: boolean
+    secret_never_injected: boolean
+    context_budget_chars: number
+    note: string
+  }
+  counts: {
+    conversations: number
+    messages: number
+    memories_approved: number
+    memories_proposed: number
+    tasks: number
+    apps: number
+  }
+  runtime: {
+    version: string
+    host: string
+    port: number
+    max_apps: number
+    max_versions_per_app: number
+  }
+}
