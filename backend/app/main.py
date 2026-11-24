@@ -282,8 +282,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             extra={"directory": failure.directory, "reason": failure.error},
         )
 
+    # 生成的应用（M9）：staging 与已安装版本都由它管理。
+    # 数据目录延迟创建——构造它不碰文件系统，首次写入时才建目录。
+    # 必须在工具注册之前创建：应用工具（list_apps 等）需要它。
+    from app.builder.staging import AppStore
+
+    app.state.app_store = AppStore(root=settings.builder_dir)
+
     tool_registry = ToolRegistry()
     register_builtin_tools(tool_registry, app.state.session_factory, skills=skill_library)
+    # 应用工具（M9 / D-027）：让对话里的 Agent 能读取并提议修改已安装应用。
+    # READ 工具无需审批；propose_app_change 是 WRITE，每次都弹审批卡片。
+    from app.capabilities.app_tools import register_app_tools
+
+    register_app_tools(tool_registry, app.state.app_store)
     app.state.tool_registry = tool_registry
 
     # 能力注册表（M8）：存放可检索、可展示的 Manifest 描述。
@@ -295,12 +307,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     for skill in skill_library.skills:
         capability_registry.register(manifest_from_skill(skill))
     app.state.capability_registry = capability_registry
-
-    # 生成的应用（M9）：staging 与已安装版本都由它管理。
-    # 数据目录延迟创建——构造它不碰文件系统，首次写入时才建目录。
-    from app.builder.staging import AppStore
-
-    app.state.app_store = AppStore(root=settings.builder_dir)
 
     # 已安装应用也投影进能力注册表：这样「生成」前能检索已有应用、
     # 优先复用（AGENT.md M9 交付项）。

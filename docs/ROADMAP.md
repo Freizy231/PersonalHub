@@ -447,8 +447,18 @@ M7 未交付（理由）：
 - [x] `POST /apps/generate` 命中相似应用时**不提交作业**，返回 similar 清单
 - [x] 前端「用这个 / 仍然重新生成 / 取消」三选一，决定权在用户
 - [x] 后端 819 项测试（本步新增 10 项）；零数据库迁移
-- [ ] **仍未做**：AI 读取并修改已安装应用
-      —— 提案已出：`docs/PROPOSAL_APP_MODIFICATION.md`（**待批准，未实施**）
+
+第十步：AI 读取并修改应用（2026-11-24，M9 最后一项）
+- [x] 三个工具：`list_apps` / `read_app` / `propose_app_change`
+- [x] `read_app` 默认允许（用户决定）；超 100k 字符拒绝而非截断
+- [x] `propose_app_change` 是 WRITE，**每次都审批**（用户决定，不开会话授权）
+- [x] 审批摘要显示"新增/删除行数"与模型说明（标明未经核实），不是一段 HTML
+- [x] 只写 staging，不改变当前版本；安装仍需用户点确认
+- [x] 卸载残留（`.<id>.uninstalled`）不可见、不可改（用户决定）
+- [x] `ToolDefinition` 增加 `argument_summarizer` / `max_result_chars`
+- [x] 后端 849 项测试（本步新增 30 项）；零数据库迁移
+- [x] **已完成**：AI 读取并修改已安装应用（D-027，依提案实施）
+      `list_apps` / `read_app`（READ）/ `propose_app_change`（WRITE，每次审批）
 - [ ] **仍未做**：应用组合（"其次组合"）
 - [ ] **仍未做**：统一组件体系（复杂度第 3 级）
 

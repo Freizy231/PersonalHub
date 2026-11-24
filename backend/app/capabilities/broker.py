@@ -268,7 +268,13 @@ class ToolBroker:
                 },
             )
 
-        return self._result(name, call_id, "ok", None, _encode_output(output))
+        return self._result(
+            name,
+            call_id,
+            "ok",
+            None,
+            _encode_output(output, limit=definition.max_result_chars or MAX_RESULT_CHARS),
+        )
 
     def _result(
         self, name: str, call_id: str, status: str, code: str | None, content: str
@@ -276,23 +282,27 @@ class ToolBroker:
         return ToolResult(call_id, name, status, content, error_code=code)
 
 
-def _encode_output(output: Any) -> str:
+def _encode_output(output: Any, *, limit: int = MAX_RESULT_CHARS) -> str:
     """把工具输出编码为字符串，并施加大小上限。
 
     必须是 JSON：模型更容易正确解读结构化结果，也便于我们断言其形态。
+
+    `limit` 由工具声明：绝大多数工具用统一上限，防止"通过工具塞入大量内容"
+    （§8.4）；`read_app` 这类**必须把完整内容交给模型**的工具单独放宽，
+    否则模型只能看到被截断的源码，改出来的东西一定是错的。
     """
     try:
         text = json.dumps(output, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         return json.dumps({"error": "工具返回了无法序列化的结果"}, ensure_ascii=False)
 
-    if len(text) > MAX_RESULT_CHARS:
+    if len(text) > limit:
         # 截断时保持 JSON 合法，避免模型收到半截结构而解析失败。
         return json.dumps(
             {
                 "truncated": True,
-                "note": f"结果超过 {MAX_RESULT_CHARS} 字符已截断",
-                "preview": text[:MAX_RESULT_CHARS],
+                "note": f"结果超过 {limit} 字符已截断",
+                "preview": text[:limit],
             },
             ensure_ascii=False,
         )

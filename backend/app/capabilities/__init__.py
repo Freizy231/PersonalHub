@@ -12,7 +12,7 @@ Schema 只用于校验输入形态，是否允许调用由 M6 的 Policy Engine 
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -79,6 +79,13 @@ class ToolDefinition:
     display_name: str = ""
     # 参数名 -> 中文标签。审批摘要据此输出"标题：…"，而不是 JSON 键值对。
     argument_labels: tuple[tuple[str, str], ...] = ()
+    # 自定义审批摘要（可选）。参数本身不可读时用它，例如一个工具的参数是
+    # 整段 HTML——把前 200 个字符塞进审批卡片，用户看到的是一堆标签。
+    # 默认 None：沿用"标签：值"的通用规则（D-012）。
+    argument_summarizer: Callable[[dict[str, Any]], list[tuple[str, str]]] | None = None
+    # 本工具结果回填给模型的上限（字符）。默认沿用 Broker 的统一上限；
+    # 需要把完整内容交给模型的工具（如读取应用源码）单独放宽。
+    max_result_chars: int | None = None
 
     def to_spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
@@ -95,6 +102,8 @@ class ToolDefinition:
         去解析括号和引号（见 docs/DECISIONS.md D-012）。
         未知参数用原始键名兜底，保证将来新增工具时不会退化成 JSON。
         """
+        if self.argument_summarizer is not None:
+            return list(self.argument_summarizer(arguments))
         labels = dict(self.argument_labels)
         summary: list[tuple[str, str]] = []
         for key, value in arguments.items():

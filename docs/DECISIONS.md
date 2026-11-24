@@ -1321,3 +1321,79 @@ id 为 `app.<app-id>`），启动时把已安装应用重新投影一遍。
 **回滚**：删除 `CapabilityRegistry.find_similar_apps` / `manifest_from_app` 及
 `_terms`，回退 `apps.py` 的 similar/skipped 字段与前端 `app-reuse` 段。
 无数据库迁移，无新增依赖。
+
+## D-027：AI 读取并修改已安装应用（M9 `Code Generation/Modification` 收尾）
+
+- 日期：2026-11-24
+- 状态：已实施（依提案 `docs/PROPOSAL_APP_MODIFICATION.md`，用户批准三项选择）
+- 规范条款：`AGENT.md` M9 交付项 `Code Generation/Modification`、§13.2
+
+**用户批准时的三项决定**
+
+1. `read_app` **默认允许**（读源码不触发审批，与读记忆同类）；
+2. **每次修改都审批**——不开启"本次会话不再询问"；
+3. **不允许**修改卸载后保留的 `.<id>.uninstalled` 目录。
+
+**三个工具**
+
+| 工具 | 风险 | 行为 |
+|---|---|---|
+| `list_apps` | READ | 列出**可用**的应用（id / 名称 / 版本 / 描述） |
+| `read_app` | READ | 返回完整 HTML；超过 100,000 字符**拒绝而不是截断** |
+| `propose_app_change` | WRITE | 静态检查 → 写 staging → 等用户安装 |
+
+**为什么读超限要拒绝而不是截断**
+
+截断的源码必然让模型改出一个残缺页面——它看到的不完整，改出来的也不完整，
+而静态检查只会检查结构，不会发现"少了一半内容"。宁可明确告诉模型
+"这个应用太大，请让用户重新生成一个更小的"。
+
+**审批卡片：让"改了多少"看得见**
+
+通用摘要会输出 `new_html：「<!doctype html>…`，用户根本不知道自己批准了什么。
+所以这个工具用自定义摘要（`ToolDefinition.argument_summarizer`）：
+
+    应用：番茄钟
+    当前版本：1.0.0 → 保存为新版本
+    大小：0.3 KB（上限 200 KB）
+    改动：新增 2 行，删除 2 行
+    模型的说明：（模型自述，未经核实）把倒计时改成 50 分钟
+
+最后一行刻意标明"未经核实"：模型一定会说"我已修复"，那是它的话，不是事实。
+
+**结果上限按工具设置**
+
+`read_app` 必须把完整源码交给模型，而 Broker 的统一上限是 8,000 字符。
+因此给 `ToolDefinition` 增加了 `max_result_chars`（默认沿用统一上限），
+只对读取类工具放宽。**不是**全局放宽——统一上限防的是"通过工具塞入大量内容"。
+
+**测试中发现的两件事**
+
+1. 工具注册顺序错了：`register_app_tools` 在 `app.state.app_store` 赋值之前调用，
+   导致所有对话测试 `AttributeError: no such object app_store`。已把 AppStore
+   的创建前移，并注明"必须在工具注册之前"。
+2. 审批必须**真的写进数据库**：Broker 不只听 resolver 说什么，它会自己校验票据
+   （M6 的核心保证）。测试里的 resolver 一开始只返回 True 没落库，结果被正确拒绝
+   ——这恰好证明那条保证是有效的。
+
+**提示词：只在有应用时注入**
+
+没有安装任何应用时，"怎么修改应用"的说明只会挤占上下文。`build_app_tools_block`
+在有可用应用时才注入。内容里写明了最关键的一条：**提交后还没生效**，
+需要用户在应用页点击安装——不写清楚，模型会跟用户说"已经改好了"。
+
+**边界（未改变的部分）**
+
+- 应用仍然只在不透明 iframe 中运行，CSP 全禁网络（D-023 的实测仍然有效）；
+- 修改只写 staging，安装仍是独立请求，用户要预览确认；
+- **不能碰内核代码**：这里没有任何能写 `backend/` 或 `frontend/src/` 的路径。
+
+**已知限制**
+
+- 一次修改要两步（审批 + 安装），对话会比纯问答长。
+- 不支持局部补丁（提案 §3 方案 C 已否决），整份替换由模型负责。
+- 100,000 字符以上的应用无法通过工具修改，只能重新生成。
+
+**回滚**：删除 `app/capabilities/app_tools.py`、`tests/test_app_tools.py`，
+回退 `main.py` 的 `register_app_tools`、`chat.py` 的 `build_app_tools_block`、
+`ToolDefinition` 的两个新字段。无数据库迁移，无新增依赖。
