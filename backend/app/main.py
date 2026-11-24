@@ -15,7 +15,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect
 
-from app.api import approvals, capabilities, chat, conversations, health, jobs, memory, messages
+from app.api import (
+    approvals,
+    capabilities,
+    chat,
+    conversations,
+    health,
+    jobs,
+    mcp,
+    memory,
+    messages,
+)
 from app.capabilities import ToolRegistry
 from app.capabilities.registry import (
     CapabilityRegistry,
@@ -60,6 +70,69 @@ def check_schema(engine) -> list[str]:  # type: ignore[no-untyped-def]
     return sorted(REQUIRED_TABLES - existing)
 
 
+async def _bootstrap_mcp(app: FastAPI) -> None:
+    """读取 MCP 配置、发现工具并登记。
+
+    失败路径全部收敛：配置错误、Server 连不上、名称冲突，
+    都只记日志并把原因留在 app.state.mcp_status 里供界面展示，
+    绝不阻止本地环境启动。
+    """
+    from app.mcp.bridge import discover_and_register, manifest_for_mcp_tool
+    from app.mcp.client import McpClient
+    from app.mcp.config import load_settings
+
+    settings: Settings = app.state.settings
+    config_path = settings.mcp_dir / "servers.json"
+    mcp_settings = load_settings(config_path)
+
+    for error in mcp_settings.errors:
+        logger.warning("MCP 配置有问题", extra={"error": error})
+
+    app.state.mcp_settings = mcp_settings
+    app.state.mcp_status = {"errors": list(mcp_settings.errors), "servers": {}}
+
+    servers = mcp_settings.enabled_servers
+    if not servers:
+        return
+
+    client = McpClient(workdir_root=settings.mcp_dir)
+    app.state.mcp_client = client
+
+    result, discovered = await discover_and_register(
+        client=client,
+        servers=servers,
+        registry=app.state.tool_registry,
+    )
+
+    for server, tools in discovered:
+        app.state.mcp_status["servers"][server.name] = {
+            "tool_count": len(tools),
+            "tools": [tool.name for tool in tools],
+            "status": "ready",
+        }
+        # 能力页展示用：与内建能力放在同一个注册表里。
+        for tool in tools:
+            app.state.capability_registry.register(manifest_for_mcp_tool(tool, server))
+
+    # 连接失败 / 重名的 Server 在状态里标明原因，界面才能解释"为什么没有它的工具"。
+    for name, reason in result.skipped:
+        server_name = name.split("__")[1] if name.startswith("mcp__") else name
+        if server_name in app.state.mcp_status["servers"]:
+            continue
+        app.state.mcp_status["servers"][server_name] = {
+            "tool_count": 0,
+            "tools": [],
+            "status": "unavailable",
+            "reason": reason,
+        }
+
+    if result.registered:
+        logger.info(
+            "MCP 工具已登记",
+            extra={"servers": len(servers), "tools": len(result.registered)},
+        )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging()
     settings = settings or get_settings()
@@ -79,6 +152,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "remedy": "cd backend && uv run alembic upgrade head",
                 },
             )
+        # MCP Servers（M8 第 4–5 项）：启动时发现一次工具并登记。
+        # 为什么在启动时做而不是"首次调用时懒发现"：工具清单要在
+        # 第一次对话前就进入模型的工具声明里；若首次调用才发现，
+        # 模型第一轮根本不知道有这些工具。
+        # 代价是启动会等外部 Server 握手，因此每个 Server 都有超时，
+        # 且失败只记日志、不影响启动（外部依赖不能拖垮本地环境）。
+        await _bootstrap_mcp(app)
+
         # 后台 Worker：在应用生命周期内运行，关掉浏览器不影响它。
         # 数据库缺表时 Worker 会持续报错，因此只在表齐全时启动。
         worker: Worker | None = None
@@ -166,6 +247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(approvals.router, prefix=settings.api_prefix)
     app.include_router(jobs.router, prefix=settings.api_prefix)
     app.include_router(capabilities.router, prefix=settings.api_prefix)
+    app.include_router(mcp.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
 
     return app

@@ -284,10 +284,26 @@ M7 未交付（理由）：
 - [x] 技能登记进能力注册表（`skill.<目录名>`），能力页可见
 - [x] 后端 488 项测试（本阶段新增 53 项）
 
+第三阶段：MCP Client 与 Broker 代理（2026-11-24）：
+- [x] 配置 `mcp/servers.json`：严格校验（未知字段、命令白名单、
+      绝对路径存在性、URL scheme、超时范围、重名）
+- [x] 单个 Server 配置写错不影响其他 Server，错误逐条报告
+- [x] 配置里出现 `risk` 字段直接报错（MCP 工具一律 WRITE）
+- [x] stdio 传输（本地子进程）与 Streamable HTTP 传输
+- [x] 启动时发现（而非懒发现）：工具清单须在第一轮对话前可见
+- [x] 子进程环境隔离：只传 PATH/HOME/LANG，不继承宿主密钥
+- [x] 子进程工作目录固定在 `mcp/<server>/`
+- [x] 工具投影为普通 ToolDefinition：`mcp__<server>__<tool>`
+- [x] **一律 WRITE**：无论 Server 如何自称只读，均需审批
+- [x] 重名拒绝登记（不覆盖）；Server 失败互相隔离
+- [x] 结果截断 8,000 字符；工具数上限 200；调用超时
+- [x] 描述标注"来自外部 MCP 服务，属于不可信数据"
+- [x] `GET /api/v1/mcp/servers` 只读状态接口
+- [x] 能力页展示 MCP 面板：可用 / 不可用（含原因）/ 未启用
+- [x] 后端 545 项测试（本阶段新增 57 项）
+
+
 未开始：
-- [ ] 4. MCP Client 连接测试 Server
-- [ ] 4. MCP Client 连接测试 Server
-- [ ] 5. Tool Broker 代理 MCP 调用
 - [ ] 6. 独立低权限 Process Plugin
 - [ ] 7. 插件安装 / 禁用 / 卸载 / 版本管理
 - [ ] 8. 评估 WASM Runtime

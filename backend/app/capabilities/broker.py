@@ -17,6 +17,7 @@ M6 完整检查链（§4.10 步骤 1–10）：
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import time
@@ -156,7 +157,7 @@ class ToolBroker:
                 definition, name, call_id, arguments, context, principal_id
             )
 
-        return self._run(definition, name, call_id, arguments, context)
+        return await self._run(definition, name, call_id, arguments, context)
 
     async def _execute_with_approval(
         self,
@@ -231,9 +232,9 @@ class ToolBroker:
                 )
                 return self._result(name, call_id, "denied", exc.code, str(exc))
 
-        return self._run(definition, name, call_id, arguments, context)
+        return await self._run(definition, name, call_id, arguments, context)
 
-    def _run(
+    async def _run(
         self,
         definition: ToolDefinition,
         name: str,
@@ -241,9 +242,16 @@ class ToolBroker:
         arguments: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
+        """执行工具。同步 handler 直接调用，异步 handler（MCP）await。
+
+        为什么在这里区分：Broker 是唯一执行入口（§4.10），
+        外部能力的执行也必须经这唯一入口，而不是另开一条绕过校验的路径。
+        """
         started = time.monotonic()
         try:
             output = definition.handler(arguments, context)
+            if inspect.isawaitable(output):
+                output = await output
         except ToolExecutionError as exc:
             return self._result(name, call_id, "error", "TOOL_ERROR", str(exc))
         except Exception:

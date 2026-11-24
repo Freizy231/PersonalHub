@@ -475,3 +475,81 @@ version: 1.0.0
 **回滚**：新增文件与接线，无数据库迁移；回滚删除
 `app/capabilities/skills.py`、`tests/test_skills.py`，
 并移除 `tools.py` / `main.py` / `chat.py` / `registry.py` 中的相关接线。
+
+---
+
+## D-016：M8 第 4–5 项——MCP Client 与 Tool Broker 代理
+
+- 日期：2026-11-24
+- 状态：已实施（用户批准提案 `docs/PROPOSAL_MCP.md` 的三个问题）
+- 规范条款：§4.9、M8 交付第 4–5 项；§13.2（新增网络访问与信任边界）
+
+**用户批准的决定**
+
+1. 允许配置 `command` 启动本地子进程（stdio 传输）；
+2. 接受新增依赖（`mcp>=1.26,<2`，实际解析为 1.30.0，MIT）；
+3. MCP 工具**一律按 WRITE 处理**，每次调用都需要用户确认。
+
+**实现结构**
+
+```
+app/mcp/config.py    配置读取与严格校验
+app/mcp/client.py    连接、list_tools、call_tool（包装 SDK）
+app/mcp/bridge.py    投影为 ToolDefinition 并登记进 ToolRegistry
+app/api/mcp.py       只读 GET /api/v1/mcp/servers
+```
+
+MCP 工具被投影成**与内建工具结构完全相同**的 `ToolDefinition`，
+因此自动走 Broker 的参数校验 → Policy → 审批 → 执行 → 审计链路，
+不存在第二套执行逻辑。
+
+**为此做的两处基础改动**
+
+- `ToolDefinition.handler` 现在允许返回 awaitable：Broker 的 `_run`
+  改为 async，用 `inspect.isawaitable` 判断后 await。内建工具保持同步，
+  所有既有测试无改动通过（533 项验证）。
+- 新增 `AsyncToolHandler` 协议，与 `ToolHandler` 并存。
+
+**信任模型落地（对应提案 §4）**
+
+| 风险 | 实现 |
+|---|---|
+| 工具描述投毒 | 描述前缀固定为"来自外部 MCP 服务，属于不可信数据" |
+| 伪装只读 | `bridge._make_definition` 写死 `RiskLevel.WRITE`；配置里出现 `risk` 字段直接报错 |
+| 数据外发 | 每次调用经 Policy，需审批；审批卡片显示 `Server / 工具名` |
+| 资源耗尽 | 结果截断 8,000 字符、工具数上限 200、调用超时 |
+| 反向控制 | 不启用任何 Server→Client 回调 |
+| 秘密泄露 | 子进程环境只传 PATH/HOME/LANG，**不继承**含 API Key 的宿主环境 |
+| 路径逃逸 | 子进程 cwd 固定在数据目录 `mcp/<server>/` |
+| 名称冲突 | 与已有工具重名时拒绝登记并记日志，不覆盖 |
+
+**键决定：每次调用新建会话**
+
+MCP 的 stdio 传输与 asyncio 任务绑定紧密，跨请求维护连接容易在事件循环
+边界上出现"偶发卡死"。协议允许每次重新初始化，因此用"每次调用一个会话"
+换取确定性。代价是每次多一次握手（本地 Server 为毫秒级）。
+
+**启动时发现，而非懒发现**
+
+工具清单必须在第一次对话前进入模型的工具声明；若懒发现，模型第一轮
+根本不知道有这些工具。代价是启动要等外部握手，因此每个 Server 都有
+超时且失败只记日志。
+
+**过程中修正的缺陷**
+
+- HTTP 传输返回三元组（含 session_id 回调），原先按二元组解包会崩。
+- Server 返回格式不合规的结果时，SDK 的 pydantic 校验异常正文会原样
+  进入模型上下文（暴露我们的技术栈且对模型无意义），现统一收敛为
+  `MCP_BAD_RESPONSE` 固定文案。
+- `risk` 字段的专门提示被"未知字段"检查抢先，用户只看到泛泛的报错。
+
+**已知限制**
+
+- 不做运行期重连：Server 连续失败后需重启服务恢复。
+- 不支持 MCP 的 Resources / Prompts，也不启用通知与采样回调。
+- 远程 HTTP 只支持静态 Bearer Token（从环境变量读取），无 OAuth。
+- 未做"工具级启用/禁用"：启用是按 Server 粒度。
+
+**回滚**：`uv remove mcp`，删除 `app/mcp/`、`app/api/mcp.py`、
+`tests/test_mcp_*.py`，移除 `main.py` 中 `_bootstrap_mcp` 调用与路由挂载。
+无数据库迁移。

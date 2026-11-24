@@ -22,6 +22,7 @@ import type {
   Job,
   JobDetail,
   JobList,
+  McpServerList,
   MemoryItem,
   MemoryList,
   Message,
@@ -194,6 +195,11 @@ export const api = {
   },
 
   /** 能力声明（M8）。只读：安装与调用需要单独的授权流程，不在此暴露。 */
+  mcp: {
+    /** 只读：MCP Server 的配置与状态。增删改需直接编辑配置文件并重启。 */
+    servers: () => request<McpServerList>('/mcp/servers'),
+  },
+
   capabilities: {
     list: (options: { q?: string; type?: string; source?: string } = {}) => {
       const params = new URLSearchParams()

@@ -12,6 +12,7 @@ Schema 只用于校验输入形态，是否允许调用由 M6 的 Policy Engine 
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -47,9 +48,24 @@ class ToolHandler(Protocol):
 
     实现必须是同步的纯业务函数：不直接访问网络、不接受任意路径、
     不执行 Shell。任何副作用型能力都要在 M6 之后单独评审。
+
+    M8 起，外部能力（MCP）通过 `AsyncToolHandler` 接入，二者由 Broker
+    分别处理；本协议保持不变，避免所有内建工具被迫改成 async。
     """
 
     def __call__(self, arguments: dict[str, Any], context: ToolContext) -> Any: ...
+
+
+class AsyncToolHandler(Protocol):
+    """异步工具实现协议（M8，供 MCP 等需要 IO 的外部能力使用）。
+
+    为什么单独定义而不是把同步协议改成 async：MCP 调用必须 await
+    （它在等外部进程/网络），而内建工具全是纯同步逻辑。让两者并存，
+    内建工具保持简单可测，外部能力也有正确的位置。
+    Broker 负责区分：同步 handler 直接调用，异步 handler 用 await。
+    """
+
+    def __call__(self, arguments: dict[str, Any], context: ToolContext) -> Awaitable[Any]: ...
 
 
 @dataclass(frozen=True, slots=True)

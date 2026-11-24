@@ -112,6 +112,15 @@ class Settings:
         """
         return self.data_dir / "skills"
 
+    @property
+    def mcp_dir(self) -> Path:
+        """MCP 配置与子进程工作目录（M8 第 4 项）。
+
+        配置文件为 `servers.json`；每个 Server 获得一个同名子目录作为
+        工作目录，子进程的默认工作路径因此不会落在主目录或源码仓库里。
+        """
+        return self.data_dir / "mcp"
+
     @classmethod
     def from_env(cls) -> Settings:
         return cls(

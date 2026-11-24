@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from '../services/api'
-import type { Capability, DependencyHealth } from '../types/api'
+import type { Capability, DependencyHealth, McpServerList } from '../types/api'
 
 const TYPE_LABEL: Record<string, string> = {
   tool: '工具',
@@ -38,6 +38,7 @@ export function CapabilityCenterPage() {
   const [items, setItems] = useState<Capability[]>([])
   const [notice, setNotice] = useState('')
   const [health, setHealth] = useState<DependencyHealth | null>(null)
+  const [mcp, setMcp] = useState<McpServerList | null>(null)
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [loading, setLoading] = useState(true)
@@ -47,12 +48,13 @@ export function CapabilityCenterPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const [list, deps] = await Promise.all([
+    const [list, deps, mcpList] = await Promise.all([
       api.capabilities.list({
         ...(query.trim() ? { q: query.trim() } : {}),
         ...(typeFilter ? { type: typeFilter } : {}),
       }),
       api.capabilities.dependencyHealth(),
+      api.mcp.servers(),
     ])
     if (!mounted.current) return
 
@@ -63,6 +65,7 @@ export function CapabilityCenterPage() {
       setError(list.message)
     }
     setHealth(deps.ok ? deps.data : null)
+    setMcp(mcpList.ok ? mcpList.data : null)
     setLoading(false)
   }, [query, typeFilter])
 
@@ -97,6 +100,8 @@ export function CapabilityCenterPage() {
           </p>
         </div>
       )}
+
+      {mcp && mcp.items.length > 0 && <McpServerPanel mcp={mcp} />}
 
       <div className="capability-center__filters">
         <label className="visually-hidden" htmlFor="capability-search">
@@ -201,4 +206,66 @@ function CapabilityCard({ capability }: { capability: Capability }) {
       </details>
     </li>
   )
+}
+
+/**
+ * MCP Server 状态面板（M8 第 4–5 项）。
+ *
+ * 只展示状态，不提供启停按钮：连接外部服务与启动子进程属于高影响操作，
+ * 必须由用户直接编辑配置文件并重启服务，而不是点一个网页按钮。
+ */
+function McpServerPanel({ mcp }: { mcp: McpServerList }) {
+  return (
+    <section className="mcp-panel" aria-label="外部 MCP 服务">
+      <header className="mcp-panel__header">
+        <h3>外部 MCP 服务</h3>
+        <span className="mcp-panel__count">{mcp.items.length} 个</span>
+      </header>
+
+      <p className="mcp-panel__notice">{mcp.notice}</p>
+
+      {mcp.errors.length > 0 && (
+        <ul className="mcp-panel__errors">
+          {mcp.errors.map((error) => (
+            <li key={error}>{error}</li>
+          ))}
+        </ul>
+      )}
+
+      <ul className="mcp-list">
+        {mcp.items.map((server) => (
+          <li key={server.name} className={`mcp mcp--${server.status}`}>
+            <div className="mcp__main">
+              <span className="mcp__name">{server.name}</span>
+              <span className="mcp__transport">{server.transport}</span>
+              <span className={`mcp__status mcp__status--${server.status}`}>
+                {MCP_STATUS_LABEL[server.status] ?? server.status}
+              </span>
+              {server.tool_count > 0 && (
+                <span className="mcp__tools">{server.tool_count} 个工具</span>
+              )}
+            </div>
+            {server.reason && <p className="mcp__reason">{server.reason}</p>}
+            {server.tools.length > 0 && (
+              <p className="mcp__toolnames">
+                {server.tools.map((tool) => (
+                  <code key={tool}>{tool}</code>
+                ))}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      <p className="mcp-panel__hint">
+        启用或修改需要在数据目录的 <code>mcp/servers.json</code> 中编辑，然后重启服务。
+      </p>
+    </section>
+  )
+}
+
+const MCP_STATUS_LABEL: Record<string, string> = {
+  ready: '可用',
+  unavailable: '不可用',
+  disabled: '未启用',
 }

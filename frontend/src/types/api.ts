@@ -216,3 +216,22 @@ export interface DependencyHealth {
   cycle: string[]
   healthy: boolean
 }
+
+/** MCP Server 状态（M8）。工具来自外部服务，全部需逐次确认。 */
+export interface McpServer {
+  name: string
+  transport: string
+  enabled: boolean
+  command: string
+  status: 'ready' | 'unavailable' | 'disabled' | string
+  tool_count: number
+  tools: string[]
+  reason: string | null
+}
+
+export interface McpServerList {
+  items: McpServer[]
+  total: number
+  errors: string[]
+  notice: string
+}

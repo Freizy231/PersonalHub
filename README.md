@@ -91,7 +91,45 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - **能力页**（导航「能力」）：列出系统已有的能力，可搜索、按类型筛选、
   展开参数结构
 - **声明不等于授权**：页面上明确标注"声明，非授权"，写操作仍需你确认
-- 尚未交付：MCP Client、隔离插件、安装/卸载（M8 第 4–8 项）
+- 尚未交付：隔离插件、安装/卸载（M8 第 6–8 项）
+
+#### 外部 MCP 服务
+
+可以通过 MCP 协议接入外部工具。**默认全部关闭**，需要你显式配置并重启服务。
+
+配置文件：`~/.local/share/personal-hub/mcp/servers.json`
+
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+      "enabled": true,
+      "timeout_seconds": 30
+    }
+  ]
+}
+```
+
+| 项 | 说明 |
+|---|---|
+| `name` | 小写字母开头，会成为工具名前缀（`mcp__<name>__<tool>`） |
+| `transport` | `stdio`（本地子进程）或 `http`（远程，需 `url`） |
+| `command` | 白名单命令名，或**已存在的绝对路径** |
+| `enabled` | **默认 false**，必须显式打开 |
+| `token_env` | 仅 http：存放 Bearer Token 的**环境变量名**（不写 Token 本身） |
+
+安全约定（都已在测试中锁定）：
+
+- **MCP 工具一律需要你逐次确认**。外部服务自称的"只读"不会被采信。
+- 子进程**不继承**本服务的环境变量——模型 API Key 不会传给外部 Server。
+- 子进程工作目录固定在 `mcp/<name>/`，不在你的主目录或源码仓库里。
+- 工具描述来自外部服务，会明确标注"不可信";结果超过 8,000 字符会截断。
+- 配置里不能写 `risk` 字段：不允许把外部工具降级成免审批。
+- Server 连不上只影响它自己，内建功能照常；原因可在「能力」页看到。
 
 #### 技能（Skills）
 
@@ -229,13 +267,14 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（488 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# 后端测试（545 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
 # workspace 隔离、role 伪造防护、流式对话、取消语义（含断开即停止生成）、
 # 历史取尾部、外发审计、代理处理、记忆提取/审核/注入隔离/去重、Agent 循环、
 # 工具 Broker、参数校验、审批人话摘要、审批绑定/过期/一次性消费/越权、
 # Policy 决策、作业队列/重试/恢复/Worker、
 # 能力 Manifest 校验/版本排序/依赖环/声明非授权/只读 API、
-# 技能解析/校验/不执行代码/路径穿越防护/对话注入）
+# 技能解析/校验/不执行代码/路径穿越防护/对话注入、
+# MCP 配置校验/命令白名单/失败隔离/一律 WRITE/代理链路/不可信标注）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 
