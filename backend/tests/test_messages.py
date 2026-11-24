@@ -163,6 +163,46 @@ class TestList:
         assert client.get(_messages_url(cid), params={"limit": 0}).status_code == 422
         assert client.get(_messages_url(cid), params={"offset": -1}).status_code == 422
 
+    def test_order_desc_returns_latest_in_chronological_order(self, client: TestClient) -> None:
+        """长会话只显示最近若干条时，必须能取到尾部（实测缺陷：固定 offset=0）。"""
+        cid = _create(client)
+        for i in range(5):
+            client.post(_messages_url(cid), json={"content": f"m{i}"})
+
+        page = client.get(_messages_url(cid), params={"limit": 2, "order": "desc"}).json()
+
+        # 取的是最新的两条，但返回顺序仍是时间正序，调用方无需反转。
+        assert [m["content"] for m in page["items"]] == ["m3", "m4"]
+        assert page["total"] == 5
+
+    def test_order_asc_is_the_default(self, client: TestClient) -> None:
+        cid = _create(client)
+        for i in range(3):
+            client.post(_messages_url(cid), json={"content": f"m{i}"})
+
+        default = client.get(_messages_url(cid), params={"limit": 2}).json()
+        explicit = client.get(_messages_url(cid), params={"limit": 2, "order": "asc"}).json()
+
+        assert [m["content"] for m in default["items"]] == ["m0", "m1"]
+        assert default["items"] == explicit["items"]
+
+    def test_order_desc_offset_walks_backwards(self, client: TestClient) -> None:
+        cid = _create(client)
+        for i in range(5):
+            client.post(_messages_url(cid), json={"content": f"m{i}"})
+
+        # offset=2 表示"从最新往回跳过 2 条"，即倒数第 3、4 条。
+        page = client.get(
+            _messages_url(cid), params={"limit": 2, "offset": 2, "order": "desc"}
+        ).json()
+
+        assert [m["content"] for m in page["items"]] == ["m1", "m2"]
+
+    def test_invalid_order_rejected(self, client: TestClient) -> None:
+        cid = _create(client)
+
+        assert client.get(_messages_url(cid), params={"order": "random"}).status_code == 422
+
 
 class TestMissingConversation:
     def test_list_missing_conversation_returns_404(self, client: TestClient) -> None:

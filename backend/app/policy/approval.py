@@ -239,6 +239,41 @@ def expire_stale(session: Session) -> int:
     return len(stale)
 
 
+def cancel_pending_by_ids(
+    session: Session, approval_ids: list[str], *, source: str = "cancelled"
+) -> int:
+    """按 id 作废仍在等待的审批，返回处理条数。
+
+    场景：用户在对话中点"停止生成"或直接关掉页面，SSE 连接断开。
+    若不清理，这些审批会一直停在 PENDING，直到超时（10 分钟）才变成 EXPIRED，
+    界面上表现为"待审批事项里躺着一个早已没人等的请求"。
+
+    用 DENIED 而不是新增状态：审批被取消在语义上就是"未被批准、不会执行"。
+    新增状态值需要数据库迁移，收益不足以支撑（见 D-012）。
+    decision_source 记录真实原因（cancelled = 对话被中断），保留可追溯性。
+
+    按 id 而非按会话：同一会话里可能有两轮生成同时在等审批，
+    结束其中一轮不该把另一轮的请求也作废。
+    """
+    if not approval_ids:
+        return 0
+    stmt = select(Approval).where(
+        Approval.id.in_(approval_ids),
+        Approval.status == ApprovalStatus.PENDING.value,
+    )
+    return _cancel(session, list(session.scalars(stmt)), source)
+
+
+def _cancel(session: Session, pending: list[Approval], source: str) -> int:
+    for approval in pending:
+        approval.status = ApprovalStatus.DENIED.value
+        approval.decision_source = source
+        approval.decided_at = _now()
+    if pending:
+        session.commit()
+    return len(pending)
+
+
 def get_for_principal(session: Session, approval_id: str, principal_id: str) -> Approval | None:
     approval = session.get(Approval, approval_id)
     if approval is None or approval.principal_id != principal_id:

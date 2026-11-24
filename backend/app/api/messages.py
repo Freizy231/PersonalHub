@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 
@@ -38,10 +38,23 @@ async def list_messages(
     messages: MessageRepoDep,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    order: Annotated[Literal["asc", "desc"], Query()] = "asc",
 ) -> MessageListOut:
+    """列出消息。
+
+    order 决定"从哪一端开始取"：
+    - asc（默认，向后兼容）：从最早的一条开始，offset 从头部数；
+    - desc：从最新的一条开始，offset 从尾部数，但 items 仍按时间正序返回。
+
+    desc 是为会话详情页准备的：长会话只显示最近 200 条，否则最新消息会
+    落在分页之外（实测缺陷）。返回顺序保持正序，调用方无需再反转。
+    """
     _require_conversation(conversations, conversation_id)
 
-    items = messages.list_for_conversation(conversation_id, limit=limit, offset=offset)
+    if order == "desc":
+        items = messages.list_latest(conversation_id, limit=limit, offset=offset)
+    else:
+        items = messages.list_for_conversation(conversation_id, limit=limit, offset=offset)
     tool_map = messages.tool_invocations_for(conversation_id)
 
     return MessageListOut(

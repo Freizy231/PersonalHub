@@ -222,7 +222,9 @@ async def stream_chat(
     messages.append(payload.conversation_id, payload.content, role="user")
     conversations.touch(conversation)
 
-    history = messages.list_for_conversation(payload.conversation_id, limit=MAX_HISTORY_MESSAGES)
+    # 注意：必须取**最近**的 N 条。用 list_for_conversation 会取到最早的 N 条，
+    # 长会话里模型看不到最新对话（实测表现为"AI 失忆"）。
+    history = messages.list_latest(payload.conversation_id, limit=MAX_HISTORY_MESSAGES)
     chat_messages = [ChatMessage(role=m.role, content=m.content) for m in history]
 
     # 2) 注入**已批准**的记忆（§4.4：PROPOSED 绝不进入上下文）。
@@ -246,12 +248,20 @@ async def stream_chat(
         终态用单一变量记录，并在 finally 中兜底写出审计记录。
         实测发现：用户取消时生成器被关闭，若只在正常分支记录，
         审计里就只剩 "started"，事后无法判断这次外发是否完成。
+
+        取消语义（§7.3）：客户端断开后必须**真正停掉**后台 Agent 循环。
+        否则循环会继续从供应商读流（继续计费），等待审批的协程也会挂满
+        TTL 才退出，留下一个没人等的 PENDING 审批。
         """
         collected: list[str] = []
         # 本轮的工具调用记录，最终随助手消息入库（§7.4 执行摘要）。
         tool_events: list[dict[str, object]] = []
+        # 已经推给前端、但用户还没决定的审批。断开时要逐个作废，
+        # 否则会留下永远没人决定的 PENDING 记录。
+        pending_approval_ids: list[str] = []
         outcome = "aborted"
         error_code: str | None = None
+        loop_task: asyncio.Task[None] | None = None
 
         try:
             # Agent 循环与 SSE 输出解耦：循环在后台任务里跑（它可能在
@@ -273,57 +283,85 @@ async def stream_chat(
                         ),
                     ):
                         await loop_events.put(item)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    # 实测缺陷：原先这里只有 finally，Agent 循环抛出的异常被
+                    # 完全吞掉，用户只看到"模型没有返回内容"，日志里也没有任何
+                    # 线索。必须记下来，并作为 error 事件推给前端。
+                    logger.exception(
+                        "Agent 循环异常终止", extra={"conversation_id": payload.conversation_id}
+                    )
+                    await loop_events.put(
+                        AgentEvent(
+                            kind="error",
+                            payload={
+                                "code": "AGENT_LOOP_ERROR",
+                                "message": f"处理过程中出现内部错误：{type(exc).__name__}",
+                            },
+                        )
+                    )
                 finally:
                     await loop_events.put(_LOOP_FINISHED)  # type: ignore[arg-type]
 
             loop_task = asyncio.create_task(drive_loop())
             loop_done = False
+            # 两个读取任务**创建一次、反复复用**。
+            #
+            # 实测缺陷：原先每轮循环都新建 asyncio.Queue.get() 任务，再取消
+            # 没先完成的那个。若审批事件恰好在"被取消但尚未处理"的窗口里
+            # 到达，Queue.get() 已经把元素取出来了，随任务一起被丢弃 ——
+            # 审批卡片永远不出现，对话卡到 TTL 超时。
+            # 复用同一个 get 任务就没有这个窗口。
+            loop_get = asyncio.create_task(loop_events.get())
+            approval_get = asyncio.create_task(approval_events.get())
 
-            while not (loop_done and loop_events.empty() and approval_events.empty()):
-                # 1) 优先把等待中的审批请求送出去（非阻塞）。
-                while not approval_events.empty():
-                    yield _sse("approval_required", approval_events.get_nowait())
-
-                # 2) 再取一个循环事件；与审批队列一起等待，避免轮询空转。
-                loop_get = asyncio.create_task(loop_events.get())
-                approval_get = asyncio.create_task(approval_events.get())
-                done, pending_waiters = await asyncio.wait(
-                    {loop_get, approval_get}, return_when=asyncio.FIRST_COMPLETED
-                )
-                for waiter_task in pending_waiters:
-                    waiter_task.cancel()
-
-                if approval_get in done:
-                    yield _sse("approval_required", approval_get.result())
-
-                if loop_get not in done:
-                    continue
-
-                event = loop_get.result()
-                if event.kind == "loop_finished":
-                    loop_done = True
-                    continue
-
-                if event.kind == "delta":
-                    collected.append(event.text)
-                    yield _sse("delta", {"text": event.text})
-                elif event.kind == "tool_start":
-                    yield _sse("tool_start", event.payload)
-                elif event.kind == "tool_end":
-                    tool_events.append(
-                        {
-                            "name": str(event.payload.get("name", "")),
-                            "status": str(event.payload.get("status", "")),
-                            "error_code": event.payload.get("error_code"),
-                        }
+            try:
+                while not (loop_done and loop_events.empty() and approval_events.empty()):
+                    done, _ = await asyncio.wait(
+                        {loop_get, approval_get}, return_when=asyncio.FIRST_COMPLETED
                     )
-                    yield _sse("tool_end", event.payload)
-                elif event.kind == "error":
-                    outcome, error_code = "failed", str(event.payload.get("code", "ERROR"))
-                    loop_task.cancel()
-                    yield _sse("error", event.payload)
-                    return
-                # done 事件不携带全文，文本已通过 delta 累加，无需再处理。
+
+                    if approval_get in done:
+                        event_payload = approval_get.result()
+                        _track_approval(event_payload, pending_approval_ids)
+                        approval_get = asyncio.create_task(approval_events.get())
+                        yield _sse("approval_required", event_payload)
+
+                    if loop_get not in done:
+                        continue
+
+                    event = loop_get.result()
+                    if event.kind == "loop_finished":
+                        loop_done = True
+                        continue
+                    # 处理完才创建下一个，保证同一时刻只有一个未完成的 get。
+                    loop_get = asyncio.create_task(loop_events.get())
+
+                    if event.kind == "delta":
+                        collected.append(event.text)
+                        yield _sse("delta", {"text": event.text})
+                    elif event.kind == "tool_start":
+                        yield _sse("tool_start", event.payload)
+                    elif event.kind == "tool_end":
+                        tool_events.append(
+                            {
+                                "name": str(event.payload.get("name", "")),
+                                "status": str(event.payload.get("status", "")),
+                                "error_code": event.payload.get("error_code"),
+                            }
+                        )
+                        yield _sse("tool_end", event.payload)
+                    elif event.kind == "error":
+                        outcome, error_code = "failed", str(event.payload.get("code", "ERROR"))
+                        loop_task.cancel()
+                        yield _sse("error", event.payload)
+                        return
+                    # done 事件不携带全文，文本已通过 delta 累加，无需再处理。
+            finally:
+                # 无论正常结束还是被取消，都不要留下悬挂的 get 任务。
+                for task in (loop_get, approval_get):
+                    task.cancel()
 
             # 循环结束后等后台任务收尾（它可能还在 finally 里）。
             await asyncio.gather(loop_task, return_exceptions=True)
@@ -354,6 +392,22 @@ async def stream_chat(
             outcome, error_code = "failed", "INTERNAL_ERROR"
             yield _sse("error", {"code": "INTERNAL_ERROR", "message": "生成失败，请稍后重试。"})
         finally:
+            # 客户端断开（用户点"停止生成"/关页面）时，`yield` 会抛
+            # GeneratorExit（或 CancelledError），走到这里。必须：
+            # 1) 取消后台 Agent 循环 —— 否则它继续从供应商读流并计费；
+            # 2) 作废仍在等待的审批 —— 否则审批停在 PENDING 直到 TTL 到期。
+            # 正常结束（已完成/已报错）时循环已结束、审批已决，这里无副作用。
+            #
+            # 注意：这里**不能 await**。生成器被关闭时还 await 会让
+            # "async generator ignored GeneratorExit" 变成新的异常。
+            # 因此只做同步操作：cancel() 是同步的，数据库清理也是同步的；
+            # 被取消任务的收尾由它自己的 finally 完成。
+            if loop_task is not None and not loop_task.done():
+                loop_task.cancel()
+                # 消费掉取消产生的异常，避免 "Task exception was never retrieved"。
+                loop_task.add_done_callback(_consume_task_result)
+            if pending_approval_ids:
+                _cancel_pending_approvals(session_factory, pending_approval_ids)
             record_egress(_with_outcome(egress_base, outcome, error_code), request_id=request_id)
 
     return StreamingResponse(
@@ -365,6 +419,41 @@ async def stream_chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def _track_approval(event_payload: dict[str, object], tracked: list[str]) -> None:
+    """记录已经推给前端的审批 id，供断开时作废。"""
+    approval_id = event_payload.get("approval_id")
+    if isinstance(approval_id, str) and approval_id:
+        tracked.append(approval_id)
+
+
+def _cancel_pending_approvals(session_factory, approval_ids: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """把不再有人等待的审批标记为已取消（DENIED + decision_source）。
+
+    只处理仍为 PENDING 的记录：用户已经批准/拒绝的不会被改写。
+    清理失败不影响主流程——审计与对话结果优先，缺失清理会由 TTL 兜底。
+    """
+    try:
+        from app.policy.approval import cancel_pending_by_ids
+
+        with session_factory() as session:
+            cancel_pending_by_ids(session, approval_ids)
+    except Exception:
+        logger.exception("清理中断对话的待审批记录失败")
+
+
+def _consume_task_result(task: asyncio.Task[object]) -> None:
+    """取出任务结果，避免取消后出现 "exception was never retrieved" 警告。
+
+    CancelledError 属于预期，直接吞掉；其他异常说明循环内部出错，
+    但此时客户端已经断开，无处可报，记日志即可。
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.debug("后台 Agent 循环异常退出", exc_info=exc)
 
 
 def _record_tool_invocations(

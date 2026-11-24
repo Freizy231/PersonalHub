@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -269,6 +270,49 @@ class TestAgentLoop:
         assert "".join(e.text for e in events) == "工具说 hi"
         assert events[0].payload["name"] == "echo"
         assert events[1].payload["status"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_tool_start_carries_display_name(self) -> None:
+        """界面需要中文工具名，且应由工具自己声明，避免前端再维护一份对照表。"""
+        tool = ToolDefinition(
+            name="echo",
+            description="测试",
+            parameters={"type": "object", "properties": {"text": {"type": "string"}}},
+            risk=RiskLevel.READ,
+            handler=lambda args, ctx: {"echo": args.get("text")},
+            display_name="回声",
+        )
+        provider = ScriptedProvider([[("echo", '{"text":"hi"}')], "完成"])
+
+        events = await _collect_events(provider, _broker_with(tool))
+
+        start = next(e for e in events if e.kind == "tool_start")
+        assert start.payload["display_name"] == "回声"
+
+    @pytest.mark.asyncio
+    async def test_loop_stops_reading_after_finish_reason(self) -> None:
+        """拿到 finish_reason 就该停止读取。
+
+        实测缺陷：有些网关不会主动关闭流（保持连接或发心跳），
+        原实现会一直等下去，表现为"话已经说完了却迟迟不继续"。
+        """
+
+        class LingeringProvider:
+            name = "lingering"
+
+            async def stream_chat(self, messages, model, tools=None) -> AsyncIterator[StreamChunk]:  # type: ignore[no-untyped-def]
+                yield StreamChunk(delta="答案")
+                yield StreamChunk(finish_reason="stop")
+                # 如果没有 break，这里会一直挂住。
+                await asyncio.sleep(3600)
+
+        events = await asyncio.wait_for(
+            _collect_events(LingeringProvider(), _broker_with(_shell_tool())), timeout=3
+        )
+
+        kinds = [e.kind for e in events]
+        assert kinds[-1] == "done"
+        assert "".join(e.text for e in events) == "答案"
 
     @pytest.mark.asyncio
     async def test_tool_result_is_fed_back_as_untrusted(self) -> None:

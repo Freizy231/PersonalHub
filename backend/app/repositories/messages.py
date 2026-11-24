@@ -37,6 +37,26 @@ class MessageRepository:
         )
         return list(self._session.scalars(stmt))
 
+    def list_latest(self, conversation_id: str, limit: int = 100, offset: int = 0) -> list[Message]:
+        """返回**最近**的若干条，但仍按时间正序排列。
+
+        为什么需要它（实测缺陷）：`list_for_conversation` 先取最早的 N 条，
+        长会话里模型因此永远看不到最近的对话，表现为"AI 突然失忆"。
+        取尾部必须倒序 LIMIT 再反转，不能只改 offset。
+
+        offset 从最新一条往回数（0 = 最后 limit 条）。
+        """
+        stmt = (
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        newest_first = list(self._session.scalars(stmt))
+        newest_first.reverse()
+        return newest_first
+
     def tool_invocations_for(self, conversation_id: str) -> dict[str, list[dict[str, object]]]:
         """按 message_id 分组返回工具调用记录（§7.4 可理解摘要）。
 
