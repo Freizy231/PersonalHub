@@ -62,3 +62,52 @@ class TestRedact:
         once = redact(raw)
 
         assert redact(once) == once
+
+
+class TestNoReservedLogKeys:
+    """`extra=` 不能使用 LogRecord 的内置属性名。
+
+    实测踩过：`extra={"created": True}` 让 logging 在执行**日志语句时**
+    抛 KeyError("Attempt to overwrite 'created' in LogRecord")——请求直接 500，
+    而堆栈指向的是日志调用，很容易被误认为是别的问题。
+    这类错误在代码审查里几乎看不出来，所以用测试扫一遍所有 logger 调用。
+    """
+
+    # 摘自 Python logging 的 LogRecord.__init__ 与 makeRecord 的保留字段。
+    RESERVED = {
+        "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
+        "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
+        "created", "msecs", "relativeCreated", "thread", "threadName",
+        "processName", "process", "taskName", "message", "asctime",
+    }  # fmt: skip
+
+    def test_no_logger_call_uses_reserved_extra_key(self) -> None:
+        import ast
+        from pathlib import Path
+
+        offenders: list[str] = []
+        root = Path(__file__).resolve().parents[1] / "app"
+        for path in root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                # logger.info(...) / logger.warning(...) 等
+                if not (
+                    isinstance(func, ast.Attribute)
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id in {"logger", "self"}
+                    and func.attr in {"debug", "info", "warning", "error", "exception", "critical"}
+                ):
+                    continue
+                for keyword in node.keywords:
+                    if keyword.arg != "extra" or not isinstance(keyword.value, ast.Dict):
+                        continue
+                    for key in keyword.value.keys:
+                        if isinstance(key, ast.Constant) and key.value in self.RESERVED:
+                            offenders.append(
+                                f"{path.name}:{node.lineno} 使用了保留字段 {key.value!r}"
+                            )
+
+        assert offenders == [], "\n".join(offenders)

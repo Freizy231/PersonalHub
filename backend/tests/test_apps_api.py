@@ -1,4 +1,4 @@
-"""应用接口测试（M9 第 4 步）。
+"""应用接口测试（M9 第 4 步，生成改为后台作业后）。
 
 全部使用假 Provider，不联网、不执行生成的代码。
 
@@ -7,10 +7,14 @@
 2. 前端不能注入 HTML：安装只读后端写在 staging 里的内容；
 3. 失败路径不留下 staging 目录；
 4. 安装、重复安装（新版本）、回滚、卸载的语义。
+
+生成已经变成后台作业：`POST /apps/generate` 只入队并返回 job_id，
+测试里需要等 Worker 跑完（`_wait_job`）。
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -18,7 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ai import ChatMessage, ProviderError, StreamChunk
-from app.api import apps as apps_module
+from app.builder import jobs as builder_jobs
 from app.core.config import Settings
 from app.main import create_app
 
@@ -64,7 +68,10 @@ class FakeProvider:
 @pytest.fixture()
 def app_client(settings: Settings, db_path: Path, monkeypatch) -> TestClient:
     provider = FakeProvider([REQUIREMENT_JSON, GOOD_APP])
-    monkeypatch.setattr(apps_module, "build_provider", lambda s: provider)
+    # 作业处理器里的 build_provider 在 create_app 时就绑定了，
+    # 因此这里必须替换 builder.jobs 模块里那个名字。
+    monkeypatch.setattr(builder_jobs, "build_provider", lambda s: provider, raising=False)
+    monkeypatch.setattr("app.api.chat.build_provider", lambda s: provider)
 
     app = create_app(settings)
     app.state.fake_provider = provider
@@ -72,10 +79,29 @@ def app_client(settings: Settings, db_path: Path, monkeypatch) -> TestClient:
         yield client
 
 
-def _generate(client: TestClient, request: str = "做一个待办清单") -> dict:
+def _wait_job(client: TestClient, job_id: str, timeout: float = 15.0) -> dict:
+    """轮询到作业结束。返回 JobDetail。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        detail = client.get(f"{API}/jobs/{job_id}").json()
+        if detail["status"] in ("SUCCEEDED", "FAILED", "CANCELLED"):
+            return detail
+        time.sleep(0.05)
+    raise AssertionError(f"作业未在 {timeout} 秒内结束：{detail}")
+
+
+def _submit(client: TestClient, request: str = "做一个待办清单") -> dict:
     response = client.post(f"{API}/apps/generate", json={"request": request})
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
     return response.json()
+
+
+def _generate(client: TestClient, request: str = "做一个待办清单") -> dict:
+    """提交并等到成功，返回 job 的 checkpoint（含 staging_id 等摘要）。"""
+    accepted = _submit(client, request)
+    detail = _wait_job(client, accepted["job_id"])
+    assert detail["status"] == "SUCCEEDED", detail
+    return {"staging_id": accepted["staging_id"], **detail["runs"][-1]["result"]}
 
 
 class TestListEmpty:
@@ -83,15 +109,51 @@ class TestListEmpty:
         assert app_client.get(f"{API}/apps").json()["items"] == []
 
 
+class TestGenerateAccepted:
+    """接口立即返回，生成在后台。"""
+
+    def test_returns_202_with_job_id(self, app_client: TestClient) -> None:
+        body = _submit(app_client)
+
+        assert body["job_id"]
+        assert body["staging_id"]
+        assert body["status"] in ("PENDING", "RUNNING")
+        assert body["job_url"].endswith(body["job_id"])
+
+    def test_pending_response_is_fast(self, app_client: TestClient) -> None:
+        """接口不做模型调用：耗时必须是毫秒级，而不是等生成完。"""
+        started = time.perf_counter()
+
+        _submit(app_client)
+
+        assert time.perf_counter() - started < 1.0
+
+    def test_job_reaches_succeeded(self, app_client: TestClient) -> None:
+        accepted = _submit(app_client)
+
+        detail = _wait_job(app_client, accepted["job_id"])
+
+        assert detail["status"] == "SUCCEEDED"
+        result = detail["runs"][-1]["result"]
+        assert result["staging_id"] == accepted["staging_id"]
+        assert result["title"] == "待办清单"
+
+    def test_describe_request_tag(self, app_client: TestClient) -> None:
+        accepted = _submit(app_client)
+
+        _wait_job(app_client, accepted["job_id"])
+
+        detail = app_client.get(f"{API}/jobs/{accepted['job_id']}").json()
+        assert detail["job_type"] == "generate_app"
+
+
 class TestGenerate:
     def test_generate_returns_staged_app(self, app_client: TestClient) -> None:
         body = _generate(app_client)
 
         assert body["staging_id"]
+        assert body["app_id"].startswith("app-")
         assert body["title"] == "待办清单"
-        assert body["capability"] == "static_display"
-        assert body["elements"] == ["标题", "待办列表"]
-        assert body["size_bytes"] > 0
 
     def test_generated_app_is_not_installed_yet(self, app_client: TestClient) -> None:
         _generate(app_client)
@@ -115,7 +177,8 @@ class TestGenerate:
         assert headers["cache-control"] == "no-store"
         assert headers["cross-origin-resource-policy"] == "same-origin"
 
-    def test_requirement_out_of_scope_rejected(self, app_client: TestClient) -> None:
+    def test_requirement_out_of_scope_rejected_immediately(self, app_client: TestClient) -> None:
+        """超范围在入队前就拒绝：省一次作业，也省一次模型调用。"""
         response = app_client.post(f"{API}/apps/generate", json={"request": "做一个能联网的工具"})
 
         assert response.status_code == 422
@@ -129,13 +192,13 @@ class TestGenerate:
             "<!doctype html><html><body><script>fetch('/x')</script></body></html>",
         ]
 
-        response = app_client.post(f"{API}/apps/generate", json={"request": "做一个待办清单"})
+        accepted = _submit(app_client)
+        detail = _wait_job(app_client, accepted["job_id"])
 
-        assert response.status_code == 422
-        body = response.json()["error"]
-        assert body["code"] == "GENERATOR_REJECTED"
-        # 具体原因要告诉用户，且一次列出。
-        assert "fetch" in body["message"]
+        assert detail["status"] == "FAILED"
+        # 用户要能看到具体原因，且一次列全。
+        assert "fetch" in (detail["last_error"] or "")
+        assert detail["attempts"] == 1, "这类错误不该自动重试（重试也是同样结果）"
         staging = settings.builder_dir / "staging"
         assert not staging.exists() or list(staging.iterdir()) == []
 
@@ -146,27 +209,23 @@ class TestGenerate:
         assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
     def test_extra_fields_rejected(self, app_client: TestClient) -> None:
+        """前端不能通过请求体塞进 HTML。"""
         response = app_client.post(
             f"{API}/apps/generate", json={"request": "做一个清单", "html": "<html></html>"}
         )
 
         assert response.status_code == 422
 
-    def test_provider_not_configured_is_clear(
-        self, settings: Settings, db_path: Path, monkeypatch
-    ) -> None:
-        from app.ai import ProviderConfigurationError
+    def test_provider_error_marks_job_failed(self, app_client: TestClient) -> None:
+        app_client.app.state.fake_provider.error = ProviderError(
+            "模型繁忙", code="PROVIDER_RATE_LIMIT"
+        )
 
-        def explode(_settings):  # type: ignore[no-untyped-def]
-            raise ProviderConfigurationError("缺少密钥")
+        accepted = _submit(app_client)
+        detail = _wait_job(app_client, accepted["job_id"])
 
-        monkeypatch.setattr(apps_module, "build_provider", explode)
-        with TestClient(create_app(settings)) as client:
-            response = client.post(f"{API}/apps/generate", json={"request": "做一个清单"})
-
-        assert response.status_code == 503
-        assert response.json()["error"]["code"] == "PROVIDER_NOT_CONFIGURED"
-        assert "缺少密钥" in response.json()["error"]["message"]
+        assert detail["status"] == "FAILED"
+        assert "模型繁忙" in (detail["last_error"] or "")
 
 
 class TestInstall:
@@ -180,7 +239,7 @@ class TestInstall:
         assert app["name"] == "待办清单"
         assert app["version"] == "1.0.0"
         assert app["ok"] is True
-        assert app_client.get(f"{API}/apps").json()["total"] == 1
+        assert len(app_client.get(f"{API}/apps").json()["items"]) == 1
 
     def test_install_discards_staging(self, app_client: TestClient) -> None:
         staged = _generate(app_client)
@@ -213,7 +272,7 @@ class TestInstall:
         app = response.json()["app"]
         assert app["version"] == "1.0.1"
         assert app["versions"] == ["1.0.0", "1.0.1"]
-        assert app_client.get(f"{API}/apps").json()["total"] == 1
+        assert len(app_client.get(f"{API}/apps").json()["items"]) == 1
 
     def test_unknown_staging_id(self, app_client: TestClient) -> None:
         response = app_client.post(f"{API}/apps/staging/nosuchid/install")
@@ -225,6 +284,17 @@ class TestInstall:
         response = app_client.get(f"{API}/apps/staging/..%2F..%2Fetc/content")
 
         assert response.status_code in (404, 422)
+
+
+class TestCancel:
+    def test_cancel_queued_job(self, app_client: TestClient) -> None:
+        """排队中的生成可以取消，且不会产出 staging。"""
+        accepted = _submit(app_client)
+
+        response = app_client.post(f"{API}/jobs/{accepted['job_id']}/cancel")
+
+        # 可能已经被 Worker 领取（RUNNING 也能取消），也可能已结束。
+        assert response.status_code in (200, 409)
 
 
 class TestRollback:

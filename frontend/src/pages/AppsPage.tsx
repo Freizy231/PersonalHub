@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from '../services/api'
-import type { AppInfo, StagedApp } from '../types/api'
+import {
+  forgetPendingJob,
+  loadPendingJob,
+  rememberPendingJob,
+} from '../services/pendingJob'
+import type { AppInfo, JobDetail, StagedApp } from '../types/api'
 
 /**
- * 应用中心（M9 第 5 步）：用一句话描述，生成一个带界面的小应用。
+ * 应用中心：用一句话描述，生成一个带界面的小应用。
  *
  * ## 预览为什么用 iframe 的 src，而不是取 HTML 塞进 srcDoc
  *
@@ -23,11 +28,25 @@ import type { AppInfo, StagedApp } from '../types/api'
  * 一旦加上 `allow-same-origin` 且与主页面同源，应用就能拿到父文档与其身份——
  * 那等于把第三方代码请进内核。
  *
- * ## 生成很慢，但仍要有明确结束
+ * ## 生成为什么是后台作业
  *
- * 生成要走两次模型调用（需求 → 生成），因此请求超时放宽到 3 分钟，
- * 并在界面上显示"正在进行第几步"，避免用户以为是卡死。
+ * 两次模型调用的总耗时常超过十秒。同步接口会让用户必须停在页面上等，
+ * 而且请求一旦被代理或浏览器掐断，结果就丢了。现在：
+ *
+ *   提交（毫秒级）→ 轮询 GET /jobs/{id} → 成功则读取 staging 预览
+ *
+ * 用户可以去做别的事再回来；关闭浏览器也不影响后台生成（Worker 在服务端）。
+ * 提交的作业 id 记在 sessionStorage 里，**刷新页面后仍能接上进度**——
+ * 否则"可以离开"就是一句空话（实测发现：结果只在组件状态里，一刷新就没了）。
  */
+
+/** 轮询间隔。生成通常十几秒，1.5 秒一次足够，也不会给 SQLite 添压力。 */
+const POLL_INTERVAL_MS = 1500
+/** 轮询上限：约 5 分钟。超过就认为作业卡住了，提示用户去活动中心看。 */
+const POLL_MAX_MS = 5 * 60 * 1000
+
+const TERMINAL = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
+
 export function AppsPage() {
   const [apps, setApps] = useState<AppInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -37,6 +56,8 @@ export function AppsPage() {
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [staged, setStaged] = useState<StagedApp | null>(null)
+  /** 正在轮询的作业。用于显示"可以去做别的事"和提供取消入口。 */
+  const [activeJob, setActiveJob] = useState<JobDetail | null>(null)
 
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -62,9 +83,14 @@ export function AppsPage() {
     // 与外部系统同步，结果异步返回。
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
+    // 刷新后接上未完成的生成。这一步让"可以离开这个页面"成为真话。
+    // oxlint-disable-next-line react/set-state-in-effect
+    void resumePendingJob()
     return () => {
       mounted.current = false
     }
+    // resumePendingJob 是稳定的（只读存储 + 调接口），不需要进依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load])
 
   async function handleGenerate() {
@@ -76,16 +102,144 @@ export function AppsPage() {
     setNotice(null)
     setStaged(null)
 
-    const result = await api.apps.generate(text)
+    const submitted = await api.apps.generate(text)
+    if (!mounted.current) return
+
+    if (!submitted.ok) {
+      // 前置筛查（超范围、空描述）在这里就会失败，不必等一次作业。
+      setGenerating(false)
+      setGenError(submitted.message)
+      return
+    }
+
+    const { job_id: jobId, staging_id: stagingId } = submitted.data
+    rememberPendingJob({ jobId, stagingId })
+
+    const finished = await pollJob(jobId)
     if (!mounted.current) return
     setGenerating(false)
+    setActiveJob(null)
+    forgetPendingJob()
 
-    if (result.ok) {
-      setStaged(result.data)
-    } else {
-      // 后端已把具体原因（含静态检查的逐条问题）写在 message 里，原样展示。
-      setGenError(result.message)
+    if (finished === null) {
+      // 轮询超时。**不说"失败"**——作业可能还在跑，说失败就是在撒谎。
+      setNotice('生成仍在后台进行。可以稍后到「活动」页查看结果。')
+      return
     }
+    // 作业成功：从 staging 读取摘要。结果里已经有标题等字段，
+    // 但预览内容仍只经 iframe 加载（见文件头注释）。
+    handleFinishedJob(finished, stagingId)
+  }
+
+  /**
+   * 刷新后接上未完成的生成。
+   *
+   * 只在组件挂载时调用。作业可能已经结束（哪怕用户离开了很久），
+   * 所以先查一次状态：成功就直接展示预览，不必再从"生成中"开始。
+   */
+  async function resumePendingJob() {
+    const pending = loadPendingJob()
+    if (pending === null) return
+
+    setGenerating(true)
+    const detail = await api.jobs.get(pending.jobId)
+    if (!mounted.current) return
+
+    if (!detail.ok) {
+      // 作业记录不见了（数据库被清理？）：不再纠缠，让用户重新提交。
+      forgetPendingJob()
+      setGenerating(false)
+      if (detail.code !== 'NOT_FOUND' && detail.code !== 'HTTP_404') {
+        setGenError(detail.message)
+      }
+      return
+    }
+
+    const job = detail.data
+    if (TERMINAL.has(job.status)) {
+      forgetPendingJob()
+      setGenerating(false)
+      handleFinishedJob(job, pending.stagingId)
+      return
+    }
+
+    const finished = await pollJob(pending.jobId)
+    if (!mounted.current) return
+    forgetPendingJob()
+    setGenerating(false)
+    setActiveJob(null)
+    if (finished === null) {
+      setNotice('生成仍在后台进行。可以稍后到「活动」页查看结果。')
+      return
+    }
+    handleFinishedJob(finished, pending.stagingId)
+  }
+
+  /** 终态作业的统一处理：成功展示预览，取消/失败给出原因。 */
+  function handleFinishedJob(job: JobDetail, stagingId: string) {
+    if (job.status === 'CANCELLED') {
+      setNotice('已取消这次生成，没有保存任何东西。')
+      return
+    }
+    if (job.status !== 'SUCCEEDED') {
+      setGenError(job.last_error ?? '生成失败，请稍后重试。')
+      return
+    }
+    void showStaged(stagingId, job)
+  }
+
+  /** 轮询到作业结束。返回 null 表示超时（不表示失败）。 */
+  async function pollJob(jobId: string): Promise<JobDetail | null> {
+    const deadline = Date.now() + POLL_MAX_MS
+    while (Date.now() < deadline) {
+      const result = await api.jobs.get(jobId)
+      if (!mounted.current) return null
+      if (!result.ok) {
+        setGenError(result.message)
+        return null
+      }
+      const detail = result.data
+      setActiveJob(detail)
+      if (TERMINAL.has(detail.status)) return detail
+      await sleep(POLL_INTERVAL_MS)
+      if (!mounted.current) return null
+    }
+    return null
+  }
+
+  /**
+   * 组装预览摘要。
+   *
+   * 字段优先取作业结果（checkpoint），拿不到的再去 `/apps/staging/{id}` 补。
+   * 之所以不直接依赖 staging 接口：它不返回 capability 与 elements。
+   */
+  async function showStaged(stagingId: string, job: JobDetail) {
+    const result = job.runs.at(-1)?.result ?? {}
+    const detail = await api.apps.staged(stagingId)
+    if (!mounted.current) return
+    if (!detail.ok) {
+      setGenError(detail.message)
+      return
+    }
+    setStaged({
+      staging_id: stagingId,
+      app_id: String(result.app_id ?? ''),
+      title: String(result.title ?? detail.data.title),
+      purpose: '',
+      elements: [],
+      capability: '',
+      size_bytes: detail.data.size_bytes,
+      generated_at: job.updated_at,
+    })
+  }
+
+  async function handleCancelJob() {
+    if (!activeJob) return
+    const result = await api.jobs.cancel(activeJob.id)
+    if (!mounted.current) return
+    if (!result.ok) setGenError(result.message)
+    // 不在这里把界面切回空闲：轮询会在下一个周期读到 CANCELLED，
+    // 由它统一收尾——否则两处各写一次状态，容易出现不一致。
   }
 
   async function handleInstall() {
@@ -186,8 +340,18 @@ export function AppsPage() {
           </button>
         </div>
         {generating && (
-          <p className="app-builder__progress">
-            正在解析需求并生成页面，通常需要十几秒到一分钟，请不要关闭页面。
+          <p className="app-builder__progress" role="status">
+            生成在后台进行，可以<strong>离开这个页面</strong>，回来时结果仍在这里。
+            <span className="app-builder__stage">{stageLabel(activeJob)}</span>
+            {activeJob && (
+              <button
+                type="button"
+                className="app-builder__cancel"
+                onClick={() => void handleCancelJob()}
+              >
+                取消生成
+              </button>
+            )}
           </p>
         )}
       </form>
@@ -208,15 +372,7 @@ export function AppsPage() {
         <div className="app-preview">
           <div className="app-preview__meta">
             <h3 className="app-preview__title">{staged.title}</h3>
-            <p className="app-preview__purpose">{staged.purpose}</p>
-            <p className="app-preview__row">
-              <span className="app-preview__label">界面</span>
-              {staged.elements.join('、')}
-            </p>
-            <p className="app-preview__row">
-              <span className="app-preview__label">类型</span>
-              {staged.capability === 'local_compute' ? '本地计算' : '只读展示'}
-            </p>
+            {staged.purpose && <p className="app-preview__purpose">{staged.purpose}</p>}
           </div>
 
           <AppFrame
@@ -326,6 +482,23 @@ export function AppsPage() {
       </ul>
     </section>
   )
+}
+
+/**
+ * 当前阶段的中文说明。
+ *
+ * 作业事件名来自后端（`progress` 是"需求已解析，正在生成页面"）。
+ * 刻意只显示"阶段"，不显示模型输出——那是不可信内容，也不该干扰用户。
+ */
+function stageLabel(job: JobDetail | null): string {
+  if (job === null) return '正在提交…'
+  if (job.status === 'PENDING') return '排队中，马上开始…'
+  if (job.status === 'RUNNING') return '正在解析需求并生成页面…'
+  return ''
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

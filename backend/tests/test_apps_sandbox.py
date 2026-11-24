@@ -27,7 +27,7 @@ import pytest
 import uvicorn
 
 from app.ai import ChatMessage, StreamChunk
-from app.api import apps as apps_module
+from app.builder import jobs as builder_jobs
 from app.core.config import Settings
 from app.main import create_app
 
@@ -71,7 +71,7 @@ def _free_port() -> int:
 @pytest.fixture()
 def live_server(settings: Settings, db_path: Path, monkeypatch) -> Iterator[str]:
     """在随机回环端口上跑真实服务。"""
-    monkeypatch.setattr(apps_module, "build_provider", lambda s: _StubProvider())
+    monkeypatch.setattr(builder_jobs, "build_provider", lambda s: _StubProvider(), raising=False)
     app = create_app(settings)
     port = _free_port()
     server = uvicorn.Server(

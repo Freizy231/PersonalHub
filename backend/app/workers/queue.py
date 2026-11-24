@@ -329,3 +329,67 @@ def list_jobs(session: Session, *, status: JobStatus | None = None, limit: int =
     if status is not None:
         stmt = stmt.where(Job.status == status.value)
     return list(session.scalars(stmt.order_by(Job.created_at.desc()).limit(limit)))
+
+
+# ---- 异步作业的辅助（M9 生成）----
+#
+# 生成要两次模型调用、耗时以十秒计。它不能占住 Worker 轮询循环
+# （其它作业会被排在后面），因此由 async 驱动器在自己的任务里执行
+# （见 workers/async_runner.py）。Worker 仍负责"领取"，保证同一作业
+# 只有一个执行者；领取之后的记录与心跳由这里的小函数完成。
+
+
+def claim_job(session: Session, job_id: str) -> bool:
+    """按 id 领取一个作业（PENDING -> RUNNING）。返回是否领取成功。
+
+    与 claim_next 相同的手段：条件 UPDATE 保证只有一个执行者成功。
+    """
+    result = session.execute(
+        update(Job)
+        .where(Job.id == job_id, Job.status == JobStatus.PENDING.value)
+        .values(status=JobStatus.RUNNING.value, attempts=Job.attempts + 1)
+    )
+    session.commit()
+    return result.rowcount == 1
+
+
+def heartbeat(session: Session, job_id: str) -> None:
+    """刷新作业的 updated_at，表示执行者还活着。
+
+    没有心跳，长任务会被 expire_running_timeout 判成卡死重新排队，
+    于是同一个作业跑两遍。
+    """
+    job = session.get(Job, job_id)
+    if job is not None:
+        job.updated_at = _now()
+        session.commit()
+
+
+def is_cancelled(session: Session, job_id: str) -> bool:
+    job = session.get(Job, job_id)
+    return job is None or job.status == JobStatus.CANCELLED.value
+
+
+def record_event(
+    session: Session, *, job_id: str, run_id: str | None, event_type: str, message: str = ""
+) -> None:
+    """追加一条执行事件（进度、阶段切换）。message 不得含用户内容正文。"""
+    session.add(
+        TaskEvent(job_id=job_id, run_id=run_id, event_type=event_type, message=message[:500])
+    )
+    session.commit()
+
+
+def mark_run_cancelled(session: Session, job_id: str, run: TaskRun) -> None:
+    """执行中被取消：如实记录，不声称撤销了已完成的部分。"""
+    run.status = RunStatus.CANCELLED.value
+    run.finished_at = _now()
+    session.add(
+        TaskEvent(
+            job_id=job_id,
+            run_id=run.id,
+            event_type="cancelled",
+            message="执行中取消，已完成的步骤不会回滚",
+        )
+    )
+    session.commit()

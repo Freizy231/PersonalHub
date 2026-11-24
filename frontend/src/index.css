@@ -2374,3 +2374,16 @@ a.button:hover {
     height: 280px;
   }
 }
+
+.app-builder__stage {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+/* 取消入口放进提示里，用无边框样式，避免抢过"生成"按钮的主次。 */
+.app-builder__cancel {
+  margin-top: 6px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+}

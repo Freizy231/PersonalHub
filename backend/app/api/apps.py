@@ -1,7 +1,7 @@
 """应用（Personal App）接口——M9 第 4 步，提案 §5.1 / §6。
 
     GET    /api/v1/apps                    列出已安装应用
-    POST   /api/v1/apps/generate           描述 → 生成到 staging（不安装）
+    POST   /api/v1/apps/generate           提交生成作业（**立即返回作业 id**）
     GET    /api/v1/apps/staging/{id}       读取一次生成的预览内容
     POST   /api/v1/apps/staging/{id}/install  把 staging 内容安装为新版本
     DELETE /api/v1/apps/staging/{id}       丢弃一次生成
@@ -21,6 +21,11 @@
    前端能传的只有 staging id。
 4. 生成需要调用模型（外发），因此与对话一样记审计日志。
 
+**生成为什么是后台作业**：它要两次模型调用，耗时以十秒计。同步接口会让
+浏览器一直挂着连接，用户离开页面就看不到结果，请求也可能被代理层掐断。
+现在 `POST /apps/generate` 只入队（毫秒级），前端拿作业 id 去
+`GET /jobs/{id}` 轮询进度与最终结果。取消走已有的 `POST /jobs/{id}/cancel`。
+
 **为什么不提供"下载 HTML 文件"**：那会让应用脱离沙箱环境运行
 （用户双击打开 = 任意本地 HTML），与"应用只能在沙箱里跑"的约束矛盾。
 """
@@ -35,13 +40,12 @@ from fastapi import APIRouter, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.ai import ProviderConfigurationError
-from app.api.chat import build_provider, provider_config_hint
-from app.builder.generator import GeneratorError, generate_app
-from app.builder.requirement import RequirementError, parse_request
+from app.api.deps import SessionDep
+from app.builder.jobs import GENERATE_APP_JOB
+from app.builder.requirement import RequirementError, check_scope
 from app.builder.staging import AppStore, BuilderError
-from app.core.audit import EgressRecord, record_egress
 from app.core.errors import PublicMessageError
+from app.workers import queue
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +89,16 @@ class GenerateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request: str = Field(min_length=1, max_length=MAX_REQUEST_CHARS)
+
+
+class GenerateAcceptedOut(BaseModel):
+    """提交生成后的即时响应。结果要等作业结束。"""
+
+    job_id: str
+    staging_id: str
+    status: str
+    # 轮询地址：前端不必自己拼路径，也便于将来改路由。
+    job_url: str
 
 
 class StagedAppOut(BaseModel):
@@ -176,28 +190,28 @@ async def list_apps(request: Request) -> AppListOut:
     return AppListOut(items=items, total=len(items))
 
 
-@router.post("/generate", response_model=StagedAppOut, summary="生成应用（不安装）")
-async def generate(request: Request, payload: GenerateIn) -> StagedAppOut:
-    """需求解析 → 生成 → 静态检查 → 写入 staging。
+@router.post(
+    "/generate",
+    response_model=GenerateAcceptedOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="提交生成作业",
+)
+async def generate(
+    request: Request, payload: GenerateIn, session: SessionDep
+) -> GenerateAcceptedOut:
+    """只做三件事：**前置筛查 → 入队 → 返回**。真正的生成在后台。
 
-    任何一步失败都**不留下文件**：写 staging 是最后一步，
-    且在内容通过检查之后。
+    前置筛查仍放在接口里（而不是全交给作业）：空描述、超长、明显超范围
+    这类问题用关键词就能判断，立刻告诉用户比让他等一次作业失败好。
+
+    作业入队后由 Worker 领取、AsyncJobRunner 执行；进度与结果通过
+    `GET /jobs/{id}` 获取（事件里含阶段，checkpoint 里含标题等摘要）。
     """
-    settings = request.app.state.settings
-    store = _store(request)
-
+    text = payload.request.strip()
+    # 这一层与作业内部的检查**故意重复**：这里是为了"立刻拒绝"，
+    # 作业里那次是真正的保证（作业也可能被其它路径入队）。
     try:
-        provider = build_provider(settings)
-    except ProviderConfigurationError as exc:
-        raise PublicMessageError(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            code="PROVIDER_NOT_CONFIGURED",
-            message=provider_config_hint(settings, str(exc)),
-        ) from exc
-
-    started = _now_iso()
-    try:
-        requirement = await parse_request(provider, settings.model, payload.request)
+        check_scope(text)
     except RequirementError as exc:
         raise PublicMessageError(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -205,75 +219,29 @@ async def generate(request: Request, payload: GenerateIn) -> StagedAppOut:
             message=str(exc),
         ) from exc
 
-    # 外发审计：生成会把用户描述发给模型，与对话同等对待。
-    # 只记录元数据，不记录描述正文（同 D-004 的原则）。
-    request_id = getattr(request.state, "request_id", None)
-    egress = EgressRecord(
-        provider=provider.name,
-        model=settings.model,
-        conversation_id="",
-        message_count=2,
-        char_count=len(payload.request),
-    )
-
-    try:
-        generated = await generate_app(provider, settings.model, requirement)
-    except GeneratorError as exc:
-        record_egress(_with_outcome(egress, "failed", exc.code), request_id=request_id)
-        # details 是静态检查的可读问题，不含模型原文，可以安全外露。
-        message = str(exc)
-        if exc.details:
-            logger.info(
-                "生成被拒绝",
-                extra={"rules": list(exc.details), "app_id": requirement.app_id},
-            )
-            # 统一错误体只有 message 字段，因此把逐条问题拼进去——
-            # 用户需要一次看到全部原因，而不是修一个报一个。
-            message = f"{exc}\n" + "\n".join(f"· {item}" for item in exc.details)
-        raise PublicMessageError(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            code=exc.code,
-            message=message,
-        ) from exc
-
-    record_egress(_with_outcome(egress, "completed"), request_id=request_id)
-
     staging_id = _new_staging_id()
-    store.write_staging(staging_id, generated.html)
-    store.write_staging_meta(
-        staging_id,
-        {
-            "staging_id": staging_id,
-            "app_id": generated.requirement.app_id,
-            "title": generated.requirement.title,
-            "purpose": generated.requirement.purpose,
-            "elements": list(generated.requirement.elements),
-            "capability": generated.requirement.capability.value,
-            "source_request": generated.requirement.raw_request,
-            "model": generated.model,
-            "generated_at": generated.created_at,
-            "started_at": started,
-        },
+    job, created = queue.enqueue(
+        session,
+        job_type=GENERATE_APP_JOB,
+        payload={"request": text, "staging_id": staging_id},
+        max_attempts=3,
     )
+
+    # 唤醒 Worker：否则用户最多要等一个轮询周期才开始。
+    worker = getattr(request.app.state, "worker", None)
+    if worker is not None and created:
+        worker.notify()
 
     logger.info(
-        "应用已生成到 staging",
-        extra={
-            "staging_id": staging_id,
-            "app_id": generated.requirement.app_id,
-            "size_bytes": len(generated.html.encode("utf-8")),
-        },
+        "已提交生成作业",
+        extra={"job_id": job.id, "staging_id": staging_id, "is_new_job": created},
     )
 
-    return StagedAppOut(
+    return GenerateAcceptedOut(
+        job_id=job.id,
         staging_id=staging_id,
-        app_id=generated.requirement.app_id,
-        title=generated.requirement.title,
-        purpose=generated.requirement.purpose,
-        elements=list(generated.requirement.elements),
-        capability=generated.requirement.capability.value,
-        size_bytes=len(generated.html.encode("utf-8")),
-        generated_at=generated.created_at,
+        status=job.status,
+        job_url=f"/api/v1/jobs/{job.id}",
     )
 
 
@@ -439,20 +407,6 @@ async def uninstall(request: Request, app_id: str) -> OkOut:
             status_code=status.HTTP_404_NOT_FOUND, code="APP_NOT_FOUND", message="应用不存在。"
         ) from exc
     return OkOut(message=message)
-
-
-def _with_outcome(
-    record: EgressRecord, outcome: str, error_code: str | None = None
-) -> EgressRecord:
-    return EgressRecord(
-        provider=record.provider,
-        model=record.model,
-        conversation_id=record.conversation_id,
-        message_count=record.message_count,
-        char_count=record.char_count,
-        outcome=outcome,
-        error_code=error_code,
-    )
 
 
 def _next_version(existing) -> str:  # type: ignore[no-untyped-def]

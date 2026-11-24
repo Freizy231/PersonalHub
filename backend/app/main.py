@@ -220,9 +220,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         # 后台 Worker：在应用生命周期内运行，关掉浏览器不影响它。
         # 数据库缺表时 Worker 会持续报错，因此只在表齐全时启动。
+        #
+        # 异步作业（M9 生成）：领取仍由 Worker 做，执行交给 AsyncJobRunner，
+        # 这样一次几十秒的生成不会挡住其它作业。
         worker: Worker | None = None
         if not missing:
-            worker = Worker(app.state.session_factory, app.state.handler_registry)
+            from app.api.chat import build_provider
+            from app.builder.jobs import GENERATE_APP_JOB, build_generate_app_handler
+            from app.workers.async_runner import AsyncJobRunner
+
+            runner = AsyncJobRunner(app.state.session_factory)
+            app.state.async_runner = runner
+            worker = Worker(
+                app.state.session_factory,
+                app.state.handler_registry,
+                async_handlers={
+                    GENERATE_APP_JOB: build_generate_app_handler(
+                        settings=settings,
+                        store=app.state.app_store,
+                        build_provider=build_provider,
+                    )
+                },
+                async_runner=runner,
+            )
             app.state.worker = worker
             await worker.start()
         else:

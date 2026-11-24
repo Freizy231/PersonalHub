@@ -168,6 +168,8 @@ export interface TaskRunItem {
   started_at: string
   finished_at: string | null
   error_code: string | null
+  /** 成功后的结果摘要（例如生成应用得到的 staging_id 与标题）。 */
+  result: Record<string, unknown> | null
 }
 
 export interface JobDetail extends Job {
@@ -295,7 +297,20 @@ export interface AppList {
   total: number
 }
 
-/** 一次生成的结果（尚未安装）。 */
+/**
+ * 提交生成后的即时响应（202）。生成在后台跑，结果要等作业结束。
+ *
+ * 为什么改成作业：生成要两次模型调用，耗时以十秒计。
+ * 同步接口会让浏览器一直挂着连接，离开页面就看不到结果。
+ */
+export interface GenerateAccepted {
+  job_id: string
+  staging_id: string
+  status: string
+  job_url: string
+}
+
+/** 生成完成后的摘要（来自作业的 checkpoint）。 */
 export interface StagedApp {
   staging_id: string
   app_id: string

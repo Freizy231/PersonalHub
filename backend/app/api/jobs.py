@@ -62,6 +62,10 @@ class RunOut(BaseModel):
     started_at: str
     finished_at: str | None
     error_code: str | None
+    # 成功后的结果摘要（例如生成应用得到的 staging_id 与标题）。
+    # 处理器写入的检查点本身就是"结果"，前端据此跳转，不必再查一次。
+    # 解析失败时置为 None，不让坏数据导致整个详情接口 500。
+    result: dict | None = None  # type: ignore[type-arg]
 
 
 class JobDetailOut(JobOut):
@@ -108,6 +112,18 @@ def _event_out(event: TaskEvent) -> EventOut:
         message=event.message,
         created_at=_iso(event.created_at),
     )
+
+
+def _parse_result(checkpoint: str | None) -> dict | None:  # type: ignore[type-arg]
+    if not checkpoint:
+        return None
+    import json
+
+    try:
+        data = json.loads(checkpoint)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _require_job(session, job_id: str) -> Job:  # type: ignore[no-untyped-def]
@@ -157,6 +173,7 @@ async def get_job(job_id: str, session: SessionDep) -> JobDetailOut:
                 started_at=_iso(r.started_at),
                 finished_at=_iso(r.finished_at) if r.finished_at else None,
                 error_code=r.error_code,
+                result=_parse_result(r.checkpoint),
             )
             for r in runs
         ],

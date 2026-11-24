@@ -11,8 +11,8 @@
 import type {
   ActivityList,
   AppList,
+  GenerateAccepted,
   InstallResult,
-  StagedApp,
   ApiErrorBody,
   Approval,
   ApprovalList,
@@ -129,12 +129,6 @@ async function request<T>(
   }
 }
 
-/**
- * 生成可能很慢（两次模型调用），用它避免 8 秒默认超时误报失败。
- * 仍然有上限：卡住时用户能明确看到失败，而不是无限等待。
- */
-const GENERATE_TIMEOUT_MS = 180_000
-
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
@@ -248,12 +242,16 @@ export const api = {
   apps: {
     list: () => request<AppList>('/apps'),
 
+    /**
+     * 提交生成作业。**立即返回**（毫秒级），不等待模型。
+     *
+     * 刻意不设长超时：接口已经不再耗时，长超时只会掩盖真正的问题。
+     */
     generate: (prompt: string) =>
-      request<StagedApp>('/apps/generate', {
+      request<GenerateAccepted>('/apps/generate', {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ request: prompt }),
-        timeoutMs: GENERATE_TIMEOUT_MS,
       }),
 
     staged: (stagingId: string) =>
