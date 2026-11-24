@@ -263,6 +263,9 @@ export interface PluginList {
   items: Plugin[]
   total: number
   notice: string
+  /** 进程插件依赖沙箱；不可用时必须如实告知，而不是让用户装完才发现跑不了。 */
+  sandbox_available: boolean
+  sandbox_reason: string
 }
 
 export interface PluginPreview {

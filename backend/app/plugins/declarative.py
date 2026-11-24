@@ -40,7 +40,13 @@ from app.capabilities.manifest import (
     CapabilitySource,
     CapabilityType,
 )
-from app.plugins.manifest import PLUGIN_TOOL_PREFIX, PluginManifest, PluginToolSpec
+from app.plugins.manifest import (
+    PLUGIN_TOOL_PREFIX,
+    PluginLimits,
+    PluginManifest,
+    PluginToolSpec,
+    PluginType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -254,3 +260,88 @@ def manifest_for_plugin_tool(manifest: PluginManifest, spec: PluginToolSpec) -> 
         compatibility=manifest.compatibility or ">=0.2.0",
         source=CapabilitySource.INSTALLED,
     )
+
+
+def build_process_tool(
+    manifest: PluginManifest,
+    spec: PluginToolSpec,
+    *,
+    plugin_dir,  # type: ignore[no-untyped-def]
+) -> ToolDefinition:
+    """把进程插件的一个工具构造为 ToolDefinition。
+
+    每次调用启动一个全新沙箱进程，返回后即退出：
+
+    - 没有长期进程，"停止"因此简化为"杀掉正在运行的那次调用"；
+    - 沙箱不可用时**拒绝执行**（绝不降级为无沙箱运行）；
+    - 进程插件一律 WRITE：它会执行第三方代码，必须由用户确认。
+    """
+    from app.plugins.process import ProcessPluginError, run_plugin
+
+    limits = manifest.limits or PluginLimits()
+    entrypoint = manifest.entrypoint
+
+    async def handler(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        del context  # 不把本地会话信息传给第三方代码
+        try:
+            result = await run_plugin(
+                plugin_dir=plugin_dir,
+                entrypoint=entrypoint,
+                tool_name=spec.name,
+                arguments=arguments,
+                limits=limits,
+            )
+        except ProcessPluginError as exc:
+            return {
+                "source": "plugin",
+                "plugin": manifest.id,
+                "tool": spec.name,
+                "status": "error",
+                "error_code": exc.code,
+                "message": str(exc),
+            }
+        return {
+            "source": "plugin",
+            "plugin": manifest.id,
+            "tool": spec.name,
+            "trust": "third-party-executable",
+            "status": "error" if result.is_error else "ok",
+            "truncated": result.truncated,
+            "result": result.text,
+        }
+
+    return ToolDefinition(
+        name=f"{PLUGIN_TOOL_PREFIX}__{spec.name}",
+        description=(
+            f"【插件 {manifest.name}（{manifest.id}）提供的工具，在沙箱中运行外部代码】\n"
+            f"{spec.description}"
+        ),
+        parameters=spec.input_schema,
+        # 进程插件一律需要审批（§8.3：执行第三方代码）。
+        risk=RiskLevel.WRITE,
+        handler=handler,
+        display_name=spec.display_name or spec.name,
+        argument_labels=spec.argument_labels,
+    )
+
+
+def register_process_plugin(
+    manifest: PluginManifest,
+    *,
+    plugin_dir,  # type: ignore[no-untyped-def]
+    registry: ToolRegistry,
+) -> CompositionResult:
+    """登记进程插件的全部工具。"""
+    if manifest.type is not PluginType.PROCESS:
+        return CompositionResult(registered=(), skipped=())
+
+    registered: list[str] = []
+    skipped: list[tuple[str, str]] = []
+    for spec in manifest.tools:
+        name = f"{PLUGIN_TOOL_PREFIX}__{spec.name}"
+        if registry.get(name) is not None:
+            skipped.append((name, f"工具名已被占用：{name}"))
+            continue
+        registry.register(build_process_tool(manifest, spec, plugin_dir=plugin_dir))
+        registered.append(name)
+    return CompositionResult(registered=tuple(registered), skipped=tuple(skipped))

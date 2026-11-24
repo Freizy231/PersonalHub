@@ -91,7 +91,69 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - **能力页**（导航「能力」）：列出系统已有的能力，可搜索、按类型筛选、
   展开参数结构
 - **声明不等于授权**：页面上明确标注"声明，非授权"，写操作仍需你确认
-- 尚未交付：进程插件（沙箱）、WASM 评估（M8 第 6b/7b/8 项）
+- 尚未交付：WASM 评估（M8 第 8 项，属"评估"而非交付）
+
+#### 插件（进程）
+
+进程插件在 **bubblewrap 沙箱**里运行你自己写的 Python 脚本，
+用于声明式插件做不到的事（读写自有数据、复杂计算等）。
+
+`plugin.json`：
+
+```json
+{
+  "id": "com.example.echo",
+  "name": "回声插件",
+  "version": "1.0.0",
+  "type": "process",
+  "description": "在沙箱里回显内容",
+  "entrypoint": "run.py",
+  "limits": { "memory_mb": 256, "cpu_seconds": 5, "timeout_seconds": 15 },
+  "tools": [
+    {
+      "name": "echo",
+      "display_name": "沙箱回声",
+      "description": "返回你提供的文本",
+      "input_schema": {
+        "type": "object",
+        "properties": { "text": { "type": "string" } },
+        "required": ["text"]
+      },
+      "argument_labels": [["text", "内容"]]
+    }
+  ]
+}
+```
+
+`run.py`（从 stdin 读参数，向 stdout 写结果）：
+
+```python
+import json, sys
+
+payload = json.loads(sys.stdin.read() or "{}")
+args = payload.get("arguments", {})
+print(json.dumps({"ok": True, "content": f"回声：{args.get('text', '')}"},
+                 ensure_ascii=False))
+```
+
+沙箱里插件**做不了**什么（均经实测验证）：
+
+| 限制 | 说明 |
+|---|---|
+| 读用户文件 | 主目录、数据库目录、`~/.ssh` 全部不可见 |
+| 联网 | 无网络命名空间，出站连接被阻断 |
+| 写自己的包 | 插件目录只读 |
+| 占满 CPU | `cpu_seconds` 到点被杀死 |
+| 吃光内存 | 超过 `memory_mb` 立即 `MemoryError` |
+| 拿到密钥 | 环境变量只传 `PATH`/`LANG`/`TERM` |
+| 写临时文件 | 可写 `/work`，进程退出即消失 |
+
+- **沙箱不可用时拒绝运行**（不会退化成无沙箱执行）。
+- 进程插件**一律需要确认**，预览里标为"需要确认（执行外部代码）"。
+- 每次调用启动一个全新沙箱，调用结束即退出；超时或取消会杀掉进程，
+  不会留下孤儿。
+- 需要系统已安装 `bubblewrap` 与 `util-linux`（提供 `prlimit`）。
+  缺失时「插件」页会显示原因，声明式插件不受影响。
 
 #### 插件（声明式）
 
@@ -324,7 +386,7 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（608 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# 后端测试（634 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
 # workspace 隔离、role 伪造防护、流式对话、取消语义（含断开即停止生成）、
 # 历史取尾部、外发审计、代理处理、记忆提取/审核/注入隔离/去重、Agent 循环、
 # 工具 Broker、参数校验、审批人话摘要、审批绑定/过期/一次性消费/越权、
@@ -332,7 +394,8 @@ cd frontend && npm run dev
 # 能力 Manifest 校验/版本排序/依赖环/声明非授权/只读 API、
 # 技能解析/校验/不执行代码/路径穿越防护/对话注入、
 # MCP 配置校验/命令白名单/失败隔离/一律 WRITE/代理链路/不可信标注、
-# 插件清单校验/组合风险传播/双层审批/路径逃逸/卸载保留目录）
+# 插件清单校验/组合风险传播/双层审批/路径逃逸/卸载保留目录、
+# 沙箱隔离（真实 bwrap：主目录/网络/只读/CPU/内存/密钥））
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 

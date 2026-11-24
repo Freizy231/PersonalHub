@@ -628,3 +628,83 @@ ContextVar 而非全局变量：并发请求互不串用。
 
 **回滚**：删除 `app/plugins/`、`app/api/plugins.py`、`tests/test_plugins.py`，
 移除 `main.py` 的 `_bootstrap_plugins` 与路由。无数据库迁移。
+
+---
+
+## D-018：M8 第 6b 项——bubblewrap 沙箱中的进程插件
+
+- 日期：2026-11-24
+- 状态：已实施（用户批准：接受 bubblewrap、先 declarative 再做进程插件）
+- 规范条款：§8.5「插件安全」、§8.3「高风险操作需确认」、M8 交付第 6 项
+
+**实现结构**
+
+```
+app/plugins/sandbox.py   探测与构造 bwrap 命令（不启动进程，可单测）
+app/plugins/process.py   启动、通信、超时、清理
+app/plugins/declarative.build_process_tool  投影为 ToolDefinition
+```
+
+**隔离实测结果**（本机真实运行，不是推测）：
+
+| 攻击面 | 结果 |
+|---|---|
+| 列用户主目录 | 被拒绝（FileNotFoundError）|
+| 读 `~/.local/share/personal-hub/db` | 不可见 |
+| 读 `~/.ssh` | 不可见 |
+| 连接 `1.1.1.1:443` | 被阻断（OSError）|
+| 写插件目录 | 只读（宿主侧确认文件未产生）|
+| 写工作目录 | 可写（tmpfs，进程退出即消失）|
+| 生成 core 文件 | 禁止 |
+| 死于 `while True: pass` | 5 秒后被 RLIMIT_CPU 杀死 |
+| 申请 2GB 内存 | MemoryError |
+| 环境变量中的密钥 | 无（只传 PATH/LANG/TERM）|
+
+**沙箱不可用 → 拒绝执行**
+`detect_sandbox()` 会真实跑一次最小沙箱做功能测试（不只看文件是否存在），
+失败则返回可操作的原因。`run_plugin` 在这种情况下直接抛
+`PLUGIN_SANDBOX_UNAVAILABLE`，**绝不降级为无沙箱运行**。
+有测试 `test_refuses_when_sandbox_missing` 锁定。
+
+**过程中踩到并修正的四个真实问题**
+
+1. **`--tmpfs /` 会让 bwrap 无法执行程序**（"execvp: No such file or
+   directory"）。bwrap 默认给的就是空根目录，去掉该参数、逐个显式挂载即可。
+2. **`/bin` 等兼容路径必须按宿主真实布局重建**：是符号链接就建链接，
+   是真实目录就绑定。写死任一种都可能让动态链接器找不到库，
+   错误信息看起来像"程序不存在"，实际是库加载失败。
+3. **`prlimit` 必须放在沙箱内部**。放在 bwrap 外面时，`RLIMIT_NPROC`
+   按宿主用户统计已有进程数（本机已有上千个），任何较小值都会让 bwrap
+   无法创建命名空间（"Resource temporarily unavailable"）。放进沙箱后
+   用户命名空间重置计数，限制才真正生效（实测 `Cannot fork`）。
+4. **`prlimit` 需要挂进沙箱**，但不能挂到只读的插件目录下（bwrap 无法
+   在其下创建挂载点），因此单独挂到 `/sandbox-bin`。
+
+另外：沙箱内用**系统 Python**（`/usr/bin/python3`）而不是虚拟环境里的，
+后者路径在沙箱内不存在。
+
+**风险级别**：进程插件一律 `WRITE`，每次调用都要确认。
+预览界面显示"需要确认（执行外部代码）"。曾出现缺陷：进程插件没有
+`composes`，被错误标成"只读"——那会让用户以为它不执行外部代码。已修。
+
+**停止语义**：每次调用启动一个全新沙箱进程，调用结束即退出。
+"停止"= 杀掉正在运行的那次调用（超时、取消、或进程退出）。
+`--die-with-parent` 保证宿主退出时不留下孤儿进程。
+没有"长期运行的插件进程"，因此也不存在需要单独管理的停止状态。
+
+**协议**：单次 stdin/stdout JSON。参数由宿主写入 stdin，插件在 stdout
+输出 `{"ok": true, "content": "..."}`。输出必须符合约定形状，
+否则拒绝（防止插件伪造"系统消息"塞给模型）。输出截断 8,000 字符。
+
+**已知限制**
+
+- 仅 Linux（bubblewrap）。macOS/Windows 上进程插件不可用，
+  界面会显示沙箱不可用的原因；声明式插件不受影响。
+- 插件必须用 Python 编写（沙箱内以 `python3 -I` 执行）。
+  其他语言需要额外挂载解释器，留待后续。
+- 每次调用重新启动沙箱，冷启动开销约数十毫秒。
+- 不支持长时间运行的插件进程（这也是"停止"语义简单的原因）。
+
+**回滚**：删除 `app/plugins/sandbox.py`、`process.py`，
+移除 `declarative.build_process_tool` / `register_process_plugin`
+与 API 中的分支。无数据库迁移。

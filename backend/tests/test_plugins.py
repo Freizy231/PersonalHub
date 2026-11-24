@@ -84,14 +84,25 @@ class TestManifestValidation:
         assert manifest.type is PluginType.DECLARATIVE
         assert len(manifest.tools) == 1
 
-    def test_manifest_has_no_executable_content(self) -> None:
-        """核心断言：本期插件清单里不可能有可执行字段。"""
+    def test_declarative_manifest_carries_no_executable_content(self) -> None:
+        """声明式插件清单里不带任何可执行内容。"""
         manifest = parse_manifest(_manifest_data())
 
-        assert not hasattr(manifest, "entrypoint")
+        assert manifest.entrypoint == ""
+        assert manifest.limits is None
         assert not hasattr(manifest, "handler")
-        tool = manifest.tools[0]
-        assert not hasattr(tool, "entrypoint")
+
+    def test_declarative_rejects_process_fields(self) -> None:
+        """写了 entrypoint 说明作者理解错了类型，必须报错而不是静默忽略。"""
+        with pytest.raises(PluginManifestError, match="不应提供 entrypoint"):
+            parse_manifest(_manifest_data(entrypoint="run.sh"))
+
+    def test_process_requires_entrypoint_and_limits(self) -> None:
+        base = _manifest_data(type="process")
+        with pytest.raises(PluginManifestError, match="必须提供 entrypoint"):
+            parse_manifest(base)
+        with pytest.raises(PluginManifestError, match="必须提供 limits"):
+            parse_manifest({**base, "entrypoint": "run.py"})
 
     @pytest.mark.parametrize(
         "bad_id", ["", "notes", "Com.Example", "com..notes", "com.example.notes.x.y.z.w"]
@@ -105,18 +116,39 @@ class TestManifestValidation:
         with pytest.raises(PluginManifestError, match="version"):
             parse_manifest(_manifest_data(version=bad_version))
 
-    def test_process_type_rejected_with_explanation(self) -> None:
-        """不静默忽略：用户必须知道自己的进程插件没有被支持。"""
-        with pytest.raises(PluginManifestError, match="只支持 declarative"):
-            parse_manifest(_manifest_data(type="process"))
+    def test_valid_process_manifest(self) -> None:
+        # 进程插件自带实现，工具**不应**声明 composes（否则会被拒绝）。
+        tool = {"name": "make_todo", "description": "实现见插件代码", "input_schema": {}}
+        manifest = parse_manifest(
+            _manifest_data(
+                type="process",
+                entrypoint="run.py",
+                limits={"memory_mb": 128, "cpu_seconds": 5, "timeout_seconds": 10},
+                tools=[tool],
+            )
+        )
 
-    def test_entrypoint_rejected(self) -> None:
-        with pytest.raises(PluginManifestError, match="entrypoint"):
-            parse_manifest(_manifest_data(entrypoint="run.sh"))
+        assert manifest.type is PluginType.PROCESS
+        assert manifest.entrypoint == "run.py"
+        assert manifest.limits is not None and manifest.limits.memory_mb == 128
 
-    def test_limits_rejected(self) -> None:
-        with pytest.raises(PluginManifestError, match="entrypoint / limits"):
-            parse_manifest(_manifest_data(limits={"memory_mb": 256}))
+    @pytest.mark.parametrize("bad", ["/etc/passwd", "../escape.py", "a/../../b.py", "a\x00b"])
+    def test_entrypoint_path_escape_rejected(self, bad: str) -> None:
+        """入口必须是插件目录内的相对路径。"""
+        with pytest.raises(PluginManifestError):
+            parse_manifest(
+                _manifest_data(type="process", entrypoint=bad, limits={"memory_mb": 128})
+            )
+
+    def test_limits_bounds(self) -> None:
+        from app.plugins.manifest import PluginLimits
+
+        with pytest.raises(PluginManifestError, match="memory_mb"):
+            PluginLimits(memory_mb=8)
+        with pytest.raises(PluginManifestError, match="cpu_seconds"):
+            PluginLimits(cpu_seconds=0)
+        with pytest.raises(PluginManifestError, match="max_processes"):
+            PluginLimits(max_processes=4)
 
     def test_unknown_field_rejected(self) -> None:
         with pytest.raises(PluginManifestError, match="未知字段"):

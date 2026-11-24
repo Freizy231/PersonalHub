@@ -118,6 +118,15 @@ export function PluginCenterPage() {
           '本期插件为声明式：不含任何可执行代码，只是复用已有工具的固定组合。'}
       </p>
 
+      {state && !state.sandbox_available && (
+        <div className="alert alert--error" role="alert">
+          <p>
+            <strong>沙箱不可用</strong>，进程插件将无法执行（声明式插件不受影响）。
+          </p>
+          <p className="plugin-center__sandbox-reason">{state.sandbox_reason}</p>
+        </div>
+      )}
+
       {notice && (
         <div className="alert alert--info" role="status">
           <p>{notice}</p>

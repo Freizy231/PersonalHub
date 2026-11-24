@@ -60,6 +60,9 @@ class PluginOut(BaseModel):
 class PluginListOut(BaseModel):
     items: list[PluginOut]
     total: int
+    # 沙箱状态：进程插件依赖它。不可用时如实告知，而不是让用户装完才发现跑不了。
+    sandbox_available: bool = False
+    sandbox_reason: str = ""
     notice: str = (
         "本期插件为声明式：不含任何可执行代码，只是复用已有工具的固定组合。"
         "插件声明的权限不代表已获授权，调用仍由策略引擎逐次判断。"
@@ -133,13 +136,24 @@ def _to_out(installed) -> PluginOut:  # type: ignore[no-untyped-def]
                 name=tool.name,
                 display_name=tool.display_name or tool.name,
                 description=tool.description[:MAX_TOOL_LABEL],
-                # 组合了写工具就需要审批——界面据此提示用户。
-                risk_hint="需要确认" if _composes_write(tool.composes) else "只读",
+                risk_hint=_risk_hint(manifest.type.value, tool.composes),
                 composes=list(tool.composes),
             )
             for tool in manifest.tools
         ],
     )
+
+
+def _risk_hint(plugin_type: str, composes: tuple[str, ...]) -> str:
+    """给用户的风险提示。
+
+    进程插件**一律**需要确认（它执行第三方代码），与它声明了什么无关。
+    这一处曾经错了：进程插件没有 composes，于是被标成"只读"——
+    那会让用户在预览里以为它不会执行外部代码。
+    """
+    if plugin_type == "process":
+        return "需要确认（执行外部代码）"
+    return "需要确认" if _composes_write(composes) else "只读"
 
 
 def _composes_write(composes: tuple[str, ...]) -> bool:
@@ -152,7 +166,16 @@ def _composes_write(composes: tuple[str, ...]) -> bool:
 @router.get("", response_model=PluginListOut, summary="列出插件")
 async def list_plugins(request: Request) -> PluginListOut:
     items = [_to_out(plugin) for plugin in _registry(request).list()]
-    return PluginListOut(items=items, total=len(items))
+
+    from app.plugins.process import sandbox_available
+
+    available, reason = sandbox_available()
+    return PluginListOut(
+        items=items,
+        total=len(items),
+        sandbox_available=available,
+        sandbox_reason=reason,
+    )
 
 
 @router.get("/preview", response_model=PreviewOut, summary="安装前预览")
@@ -172,12 +195,27 @@ async def preview_plugin(
         ) from exc
 
     warnings: list[str] = []
+    if manifest.type.value == "process":
+        from app.plugins.process import sandbox_available
+
+        available, reason = sandbox_available()
+        if not available:
+            # 装得上也跑不了——必须现在就说清楚。
+            warnings.append(f"沙箱不可用，该进程插件将无法执行：{reason}")
+        else:
+            warnings.append(
+                "该插件会在沙箱中运行外部代码：无网络、只读的系统目录、"
+                f"内存 {manifest.limits.memory_mb if manifest.limits else 256}MB、"
+                f"CPU {manifest.limits.cpu_seconds if manifest.limits else 10} 秒上限。"
+            )
     if manifest.dependencies:
         warnings.append(f"依赖其他插件：{', '.join(manifest.dependencies)}")
     if manifest.permissions:
         warnings.append(f"声明了权限：{', '.join(manifest.permissions)}（声明不等于授权）")
-    if any(_composes_write(tool.composes) for tool in manifest.tools):
-        warnings.append("该插件包含写操作，调用时会要求你确认。")
+    if manifest.type.value == "process" or any(
+        _composes_write(tool.composes) for tool in manifest.tools
+    ):
+        warnings.append("该插件包含写操作或执行外部代码，调用时会要求你确认。")
 
     return PreviewOut(
         id=manifest.id,
@@ -191,7 +229,7 @@ async def preview_plugin(
                 name=tool.name,
                 display_name=tool.display_name or tool.name,
                 description=tool.description[:MAX_TOOL_LABEL],
-                risk_hint="需要确认" if _composes_write(tool.composes) else "只读",
+                risk_hint=_risk_hint(manifest.type.value, tool.composes),
                 composes=list(tool.composes),
             )
             for tool in manifest.tools
@@ -272,10 +310,22 @@ def _activate(request: Request, plugin_id: str) -> None:
         return
 
     from app.capabilities import ToolRegistry
-    from app.plugins.declarative import manifest_for_plugin_tool, register_plugin_tools
+    from app.plugins.declarative import (
+        manifest_for_plugin_tool,
+        register_plugin_tools,
+        register_process_plugin,
+    )
+    from app.plugins.manifest import PluginType
 
     tools: ToolRegistry = request.app.state.tool_registry
-    result = register_plugin_tools(installed.manifest, registry=tools)
+    if installed.manifest.type is PluginType.PROCESS:
+        result = register_process_plugin(
+            installed.manifest,
+            plugin_dir=registry.root / installed.directory,
+            registry=tools,
+        )
+    else:
+        result = register_plugin_tools(installed.manifest, registry=tools)
 
     for name, reason in result.skipped:
         logger.warning("插件工具登记失败", extra={"tool": name, "reason": reason})

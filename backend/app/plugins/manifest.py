@@ -56,6 +56,22 @@ class PluginType(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class PluginLimits:
+    """进程插件的资源上限（§8.5：为 CPU、内存、时间设置限制）。
+
+    默认值刻意保守：第三方代码宁可跑得慢一点，也不能把本机拖垮。
+    """
+
+    memory_mb: int = 256
+    cpu_seconds: int = 10
+    timeout_seconds: int = 30
+    max_processes: int = 32
+
+    def __post_init__(self) -> None:
+        _validate_limits(self)
+
+
+@dataclass(frozen=True, slots=True)
 class PluginToolSpec:
     """插件声明的一个工具。"""
 
@@ -86,6 +102,9 @@ class PluginManifest:
     dependencies: tuple[str, ...] = ()
     compatibility: str = ""
     tools: tuple[PluginToolSpec, ...] = field(default_factory=tuple)
+    # 仅 process 类型使用
+    entrypoint: str = ""
+    limits: PluginLimits | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.type, str) and not isinstance(self.type, PluginType):
@@ -119,11 +138,13 @@ def validate_manifest(manifest: PluginManifest) -> None:
         raise PluginManifestError(f"插件 version 必须形如 1.0.0：{manifest.version!r}")
 
     if manifest.type is PluginType.PROCESS:
-        # 本期明确不支持：不静默忽略成 declarative，否则用户会以为
-        # 自己的可执行插件已经被/不会被运行，两种情况都很危险。
-        raise PluginManifestError(
-            "本期只支持 declarative（声明式）插件；process 类型将在后续阶段支持。"
-        )
+        # 进程插件必须声明入口与资源上限。缺任何一项都拒绝：
+        # 没有上限的第三方进程可以吃光内存或 CPU。
+        if not manifest.entrypoint:
+            raise PluginManifestError("process 类型插件必须提供 entrypoint。")
+        _validate_entrypoint(manifest.entrypoint)
+        if manifest.limits is None:
+            raise PluginManifestError("process 类型插件必须提供 limits（资源上限）。")
 
     if not manifest.tools:
         raise PluginManifestError("插件至少要声明一个工具。")
@@ -132,7 +153,8 @@ def validate_manifest(manifest: PluginManifest) -> None:
 
     seen: set[str] = set()
     for tool in manifest.tools:
-        _validate_tool(tool, seen)
+        # composes 是**声明式**的要求：进程插件自带实现，不需要组合任何工具。
+        _validate_tool(tool, seen, require_composes=manifest.type is not PluginType.PROCESS)
 
     for dependency in manifest.dependencies:
         # 依赖必须是另一个插件的 id，不能是内建工具名。
@@ -142,7 +164,35 @@ def validate_manifest(manifest: PluginManifest) -> None:
             raise PluginManifestError("插件不能依赖自身。")
 
 
-def _validate_tool(tool: PluginToolSpec, seen: set[str]) -> None:
+def _validate_entrypoint(entrypoint: str) -> None:
+    """入口必须是插件目录内的**相对路径**，不能是绝对路径或逃逸路径。"""
+    if not entrypoint.strip():
+        raise PluginManifestError("entrypoint 不能为空。")
+    if len(entrypoint) > 200:
+        raise PluginManifestError("entrypoint 过长。")
+    if entrypoint.startswith(("/", "\\")) or "\x00" in entrypoint:
+        raise PluginManifestError("entrypoint 必须是插件目录内的相对路径。")
+
+    # 规范化后不允许逃出插件目录。
+    parts = [part for part in entrypoint.replace("\\", "/").split("/") if part not in ("", ".")]
+    if any(part == ".." for part in parts):
+        raise PluginManifestError("entrypoint 不能包含 ..（不允许逃出插件目录）。")
+
+
+def _validate_limits(limits: PluginLimits) -> None:
+    if not 32 <= limits.memory_mb <= 4096:
+        raise PluginManifestError("limits.memory_mb 必须在 32–4096 之间。")
+    if not 1 <= limits.cpu_seconds <= 600:
+        raise PluginManifestError("limits.cpu_seconds 必须在 1–600 之间。")
+    if not 1 <= limits.timeout_seconds <= 600:
+        raise PluginManifestError("limits.timeout_seconds 必须在 1–600 之间。")
+    # 下限不能太低：bubblewrap 自身要创建若干进程，nproc 太小会让
+    # 命名空间创建直接失败（实测 --nproc=8 报 "Resource temporarily unavailable"）。
+    if not 32 <= limits.max_processes <= 256:
+        raise PluginManifestError("limits.max_processes 必须在 32–256 之间。")
+
+
+def _validate_tool(tool: PluginToolSpec, seen: set[str], *, require_composes: bool = True) -> None:
     if not _TOOL_NAME_PATTERN.match(tool.name):
         raise PluginManifestError(
             f"工具名 {tool.name!r} 不合法：只能用小写字母、数字、下划线，以字母开头，最长 64。"
@@ -156,10 +206,15 @@ def _validate_tool(tool: PluginToolSpec, seen: set[str]) -> None:
     if len(tool.description) > MAX_DESCRIPTION_LENGTH:
         raise PluginManifestError(f"工具 {tool.name} 的 description 过长。")
 
-    if not tool.composes:
+    if require_composes and not tool.composes:
         raise PluginManifestError(
             f"工具 {tool.name} 必须声明 composes（要组合的内建工具）。"
             "声明式插件不含代码，它只能复用已有能力。"
+        )
+    if not require_composes and tool.composes:
+        raise PluginManifestError(
+            f"进程插件的工具 {tool.name} 不应声明 composes："
+            "它由插件自己的代码实现，不组合其他工具。"
         )
     for composed in tool.composes:
         # 必须是内建的 <namespace>.<tool> 形式；不接受外部插件或任意字符串。
@@ -252,11 +307,6 @@ def parse_manifest(data: dict[str, Any]) -> PluginManifest:
     if unknown:
         raise PluginManifestError(f"清单含有未知字段：{', '.join(sorted(unknown))}")
 
-    if "entrypoint" in data or "limits" in data:
-        raise PluginManifestError(
-            "本期只支持 declarative（声明式）插件，不支持 entrypoint / limits。"
-        )
-
     for key in ("id", "name", "version", "type"):
         if key not in data:
             raise PluginManifestError(f"清单缺少必需字段：{key}")
@@ -279,7 +329,25 @@ def parse_manifest(data: dict[str, Any]) -> PluginManifest:
         if key in data and not isinstance(data[key], str):
             raise PluginManifestError(f"{key} 必须是字符串。")
 
-    return PluginManifest(
+    entrypoint = data.get("entrypoint", "")
+    if entrypoint and not isinstance(entrypoint, str):
+        raise PluginManifestError("entrypoint 必须是字符串。")
+
+    limits_raw = data.get("limits")
+    limits: PluginLimits | None = None
+    if limits_raw is not None:
+        if not isinstance(limits_raw, dict):
+            raise PluginManifestError("limits 必须是对象。")
+        allowed_limits = {"memory_mb", "cpu_seconds", "timeout_seconds", "max_processes"}
+        unknown_limits = set(limits_raw) - allowed_limits
+        if unknown_limits:
+            raise PluginManifestError(f"limits 含有未知字段：{', '.join(sorted(unknown_limits))}")
+        for key, value in limits_raw.items():
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise PluginManifestError(f"limits.{key} 必须是整数。")
+        limits = PluginLimits(**limits_raw)
+
+    manifest = PluginManifest(
         id=str(data["id"]),
         name=str(data["name"]),
         version=str(data["version"]),
@@ -289,7 +357,16 @@ def parse_manifest(data: dict[str, Any]) -> PluginManifest:
         dependencies=tuple(dependencies),
         compatibility=str(data.get("compatibility", "")),
         tools=tools,
+        entrypoint=str(entrypoint),
+        limits=limits,
     )
+    # declarative 类型不应带进程相关字段：写了说明作者理解错了类型，
+    # 静默忽略会让插件"看起来能用"其实不会被执行。
+    if manifest.type is PluginType.DECLARATIVE and (manifest.entrypoint or manifest.limits):
+        raise PluginManifestError(
+            "declarative 插件不应提供 entrypoint / limits；如需运行可执行文件请使用 type: process。"
+        )
+    return manifest
 
 
 def load_manifest(directory: Path) -> PluginManifest:
