@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ApprovalCard } from '../components/ApprovalCard'
 import { MessageComposer } from '../components/MessageComposer'
 import { MessageList } from '../components/MessageList'
+import { PageHeader } from '../components/PageHeader'
 import { EarlierMessages } from '../components/EarlierMessages'
 import { SendStatusBar } from '../components/SendStatusBar'
 import { ToolActivityList } from '../components/ToolActivityList'
@@ -131,13 +132,14 @@ export function ConversationDetailPage() {
 
   return (
     <section className="detail">
-      <nav className="detail__nav">
-        <Link to="/conversations">← 返回列表</Link>
-      </nav>
-
-      <h2 className="detail__title">
-        {state.loading && !state.conversation ? '正在加载…' : state.conversation?.title}
-      </h2>
+      <PageHeader
+        title={state.loading && !state.conversation ? '正在加载…' : (state.conversation?.title ?? '对话')}
+        actions={
+          <Link className="detail__back" to="/conversations">
+            ← 返回列表
+          </Link>
+        }
+      />
 
       {state.loading && state.messages.length === 0 ? (
         <p className="messages__empty">正在加载消息…</p>

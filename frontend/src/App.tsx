@@ -1,5 +1,6 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 
+import { AppShell } from './components/AppShell'
 import { ActivityCenterPage } from './pages/ActivityCenterPage'
 import { AppsPage } from './pages/AppsPage'
 import { CapabilityCenterPage } from './pages/CapabilityCenterPage'
@@ -12,43 +13,17 @@ import { PluginCenterPage } from './pages/PluginCenterPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UserTasksPage } from './pages/UserTasksPage'
 
-/** 导航只列出已实现的页面，避免死链接（AGENT.md：不提前创建空模块）。 */
-const NAV_ITEMS = [
-  { to: '/', label: '总览', end: true },
-  { to: '/conversations', label: '会话', end: false },
-  { to: '/memory', label: '记忆', end: false },
-  // 「我的任务」（用户事项）与「后台作业」（Worker 执行）是两个不同实体，
-  // 导航上必须分开显示（D-013）。
-  { to: '/tasks', label: '我的任务', end: false },
-  { to: '/jobs', label: '后台作业', end: false },
-  { to: '/activity', label: '活动', end: false },
-  { to: '/capabilities', label: '能力', end: false },
-  { to: '/plugins', label: '插件', end: false },
-  { to: '/apps', label: '应用', end: false },
-  { to: '/settings', label: '设置', end: false },
-]
-
+/**
+ * 路由表 + 应用壳层。
+ *
+ * 导航已从"标题下方一排横排链接"改为左侧应用导航（见 `components/AppShell`），
+ * 因此这里不再维护 NAV_ITEMS——导航项定义在壳层里，与路由表分开：
+ * 前者决定"用户怎么找功能"，后者决定"地址对应哪个页面"。
+ */
 export default function App() {
   return (
     <BrowserRouter>
-      <main className="app">
-        <header className="app__header">
-          <h1 className="app__title">Personal Hub</h1>
-          <p className="app__subtitle">本地优先的个人 AI 环境</p>
-          <nav className="app__nav" aria-label="主导航">
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => (isActive ? 'app__nav-link is-active' : 'app__nav-link')}
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        </header>
-
+      <AppShell>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
@@ -80,17 +55,13 @@ export default function App() {
               <section className="detail">
                 <p className="detail__message">页面不存在。</p>
                 <NavLink className="button" to="/">
-                  返回总览
+                  返回工作台
                 </NavLink>
               </section>
             }
           />
         </Routes>
-
-        <footer className="app__footer">
-          <p>数据默认留在本机，服务只监听回环地址。</p>
-        </footer>
-      </main>
+      </AppShell>
     </BrowserRouter>
   )
 }

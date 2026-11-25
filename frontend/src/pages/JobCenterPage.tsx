@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 
 import { JobCard } from '../components/JobCard'
+import { PageHeader } from '../components/PageHeader'
 import { useJobs, type JobFilter } from '../hooks/useJobs'
 
 const FILTERS: { key: JobFilter; label: string; to: string }[] = [
@@ -23,12 +24,14 @@ export function JobCenterPage({ filter }: { filter: JobFilter }) {
 
   return (
     <section className="task-center">
-      <header className="task-center__header">
-        <h2>后台作业</h2>
-        <span className="task-center__count">
-          {state.loading ? '加载中…' : `共 ${state.total} 个`}
-        </span>
-      </header>
+      <PageHeader
+        title="后台作业"
+        actions={
+          <span className="task-center__count">
+            {state.loading ? '加载中…' : `共 ${state.total} 个`}
+          </span>
+        }
+      />
 
       <p className="task-center__notice">
         作业由本地服务在后台执行，<strong>关闭浏览器不影响</strong>；

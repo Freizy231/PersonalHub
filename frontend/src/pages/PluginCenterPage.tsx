@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { PageHeader } from '../components/PageHeader'
 import { api } from '../services/api'
 import type { Plugin, PluginList, PluginPreview } from '../types/api'
 
@@ -106,12 +107,14 @@ export function PluginCenterPage() {
 
   return (
     <section className="plugin-center">
-      <header className="plugin-center__header">
-        <h2>插件</h2>
-        <span className="plugin-center__count">
-          {loading ? '加载中…' : `共 ${state?.total ?? 0} 个`}
-        </span>
-      </header>
+      <PageHeader
+        title="插件"
+        actions={
+          <span className="plugin-center__count">
+            {loading ? '加载中…' : `共 ${state?.total ?? 0} 个`}
+          </span>
+        }
+      />
 
       <p className="plugin-center__notice">
         {state?.notice ??

@@ -1,4 +1,5 @@
 import { ConversationItem } from './ConversationItem'
+import { PageHeader } from './PageHeader'
 import { NewConversationForm } from './NewConversationForm'
 import { useConversations } from '../hooks/useConversations'
 
@@ -13,15 +14,20 @@ export function ConversationList() {
     useConversations()
 
   return (
-    <section className="conversations">
-      <header className="conversations__header">
-        <h2>会话</h2>
-        <span className="conversations__count">
-          {state.loading ? '加载中…' : `共 ${state.total} 个`}
-        </span>
-      </header>
+    <>
+      {/* 标题栏在卡片之外：与页面标题共享同一左边界（规范 §2.4）。
+          放进卡片里会让标题比正文多缩进一层内边距。 */}
+      <PageHeader
+        title="对话"
+        actions={
+          <span className="conversations__count">
+            {state.loading ? '加载中…' : `共 ${state.total} 个`}
+          </span>
+        }
+      />
 
-      <NewConversationForm onSubmit={create} busy={busy} />
+      <section className="conversations">
+        <NewConversationForm onSubmit={create} busy={busy} />
 
       {actionError && (
         <div className="alert alert--error" role="alert">
@@ -56,6 +62,7 @@ export function ConversationList() {
           ))}
         </ul>
       )}
-    </section>
+      </section>
+    </>
   )
 }

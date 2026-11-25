@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 
 import { formatRelative, isTerminal, jobTypeLabel, stageLabel } from '../components/jobLabels'
+import { PageHeader } from '../components/PageHeader'
 import { StatusCard } from '../components/StatusCard'
 import { toolLabel } from '../components/toolLabels'
 import { useHealth } from '../hooks/useHealth'
@@ -28,16 +29,23 @@ export function HomePage() {
 
   return (
     <>
-      <section className="workbench" aria-labelledby="workbench-title">
-        <header className="workbench__header">
-          <h2 id="workbench-title">今天从这里开始</h2>
+      <PageHeader
+        title="工作台"
+        description="接下来要做的事、等你确认的操作，以及后台正在跑的作业。"
+        actions={
           <button type="button" className="workbench__refresh" onClick={reload} disabled={bench.loading}>
             刷新
           </button>
-        </header>
+        }
+      />
+
+      <section className="workbench" aria-labelledby="workbench-title">
+        <h2 id="workbench-title" className="section-title">
+          今天从这里开始
+        </h2>
 
         <div className="workbench__grid">
-          <article className="workbench-card" aria-labelledby="wb-tasks">
+          <article className="workbench-card workbench-card--tasks" aria-labelledby="wb-tasks">
             <header className="workbench-card__header">
               <h3 id="wb-tasks">我的任务</h3>
               <Link className="workbench-card__more" to="/tasks">
@@ -63,7 +71,7 @@ export function HomePage() {
             )}
           </article>
 
-          <article className="workbench-card" aria-labelledby="wb-approvals">
+          <article className="workbench-card workbench-card--approvals" aria-labelledby="wb-approvals">
             <header className="workbench-card__header">
               <h3 id="wb-approvals">待确认</h3>
               <span className="workbench-card__badge">{bench.pendingApprovals.length}</span>
@@ -91,7 +99,7 @@ export function HomePage() {
             )}
           </article>
 
-          <article className="workbench-card" aria-labelledby="wb-jobs">
+          <article className="workbench-card workbench-card--jobs" aria-labelledby="wb-jobs">
             <header className="workbench-card__header">
               <h3 id="wb-jobs">后台作业</h3>
               <Link className="workbench-card__more" to="/jobs">
@@ -135,7 +143,7 @@ export function HomePage() {
             )}
           </article>
 
-          <article className="workbench-card" aria-labelledby="wb-conversations">
+          <article className="workbench-card workbench-card--conversations" aria-labelledby="wb-conversations">
             <header className="workbench-card__header">
               <h3 id="wb-conversations">继续对话</h3>
               <Link className="workbench-card__more" to="/conversations">

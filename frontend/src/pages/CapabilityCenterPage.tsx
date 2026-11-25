@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { PageHeader } from '../components/PageHeader'
 import { api } from '../services/api'
 import {
   RISK_HINT,
@@ -81,15 +82,17 @@ export function CapabilityCenterPage() {
 
   return (
     <section className="capability-center">
-      <header className="capability-center__header">
-        <h2>能力</h2>
-        <span className="capability-center__count">
-          {loading ? '加载中…' : `共 ${items.length} 个`}
-          {!loading && totalCapabilities > 0 && items.length !== totalCapabilities && (
-            <span className="capability-center__total">（系统共 {totalCapabilities} 个）</span>
-          )}
-        </span>
-      </header>
+      <PageHeader
+        title="能力"
+        actions={
+          <span className="capability-center__count">
+            {loading ? '加载中…' : `共 ${items.length} 个`}
+            {!loading && totalCapabilities > 0 && items.length !== totalCapabilities && (
+              <span className="capability-center__total">（系统共 {totalCapabilities} 个）</span>
+            )}
+          </span>
+        }
+      />
 
       <p className="capability-center__notice">
         {notice || '这里展示的是能力声明，声明权限不代表已获授权。'}

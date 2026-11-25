@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { MemoryCard } from '../components/MemoryCard'
+import { PageHeader } from '../components/PageHeader'
 import { useMemories, type MemoryFilter } from '../hooks/useMemories'
 
 const FILTERS: { key: MemoryFilter; label: string }[] = [
@@ -67,12 +68,14 @@ export function MemoryCenterPage({ filter }: MemoryCenterPageProps) {
 
   return (
     <section className="memory-center">
-      <header className="memory-center__header">
-        <h2>记忆中心</h2>
-        {state.pendingCount > 0 && (
-          <span className="memory-center__pending">{state.pendingCount} 条待审核</span>
-        )}
-      </header>
+      <PageHeader
+        title="记忆中心"
+        actions={
+          state.pendingCount > 0 ? (
+            <span className="memory-center__pending">{state.pendingCount} 条待审核</span>
+          ) : null
+        }
+      />
 
       <p className="memory-center__notice">
         只有<strong>已采用</strong>的记忆会作为背景信息进入对话。

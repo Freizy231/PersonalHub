@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { FlowSteps, PendingStaging, StagedPreview } from '../components/AppFlow'
+import { PageHeader } from '../components/PageHeader'
 import { api } from '../services/api'
 import { computeSteps } from '../services/appFlow'
 import {
@@ -338,10 +339,7 @@ export function AppsPage() {
 
   return (
     <section className="app-center">
-      <header className="app-center__header">
-        <h2>应用</h2>
-        <span className="app-center__count">{apps.length} 个</span>
-      </header>
+      <PageHeader title="应用" actions={<span className="app-center__count">{apps.length} 个</span>} />
 
       <p className="app-center__notice">
         用一句话描述你想要的页面，系统会生成一个单文件小应用。应用在<strong>完全隔离</strong>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { JobDetailView } from '../components/JobCard'
+import { PageHeader } from '../components/PageHeader'
 import { EVENT_LABEL, formatTime } from '../components/jobLabels'
 import { api } from '../services/api'
 import type { ActivityList, JobDetail } from '../types/api'
@@ -45,14 +46,16 @@ export function ActivityCenterPage() {
 
   return (
     <section className="activity-center">
-      <header className="activity-center__header">
-        <h2>{jobId ? '任务详情' : '活动'}</h2>
-        {jobId && (
-          <Link className="activity-center__back" to="/activity">
-            ← 返回活动
-          </Link>
-        )}
-      </header>
+      <PageHeader
+        title={jobId ? '作业详情' : '活动'}
+        actions={
+          jobId ? (
+            <Link className="activity-center__back" to="/activity">
+              ← 返回活动
+            </Link>
+          ) : null
+        }
+      />
 
       {error ? (
         <div className="alert alert--error" role="alert">

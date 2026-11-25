@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { formatBytes } from '../components/formatBytes'
+import { PageHeader } from '../components/PageHeader'
 import { api } from '../services/api'
 import type { SettingsView } from '../types/api'
 
@@ -49,6 +50,7 @@ export function SettingsPage() {
   if (loading && state === null) {
     return (
       <section className="settings">
+        <PageHeader title="设置" />
         <p className="settings__loading">正在加载…</p>
       </section>
     )
@@ -57,6 +59,7 @@ export function SettingsPage() {
   if (error) {
     return (
       <section className="settings">
+        <PageHeader title="设置" />
         <div className="alert alert--error" role="alert">
           <p>{error}</p>
         </div>
@@ -73,12 +76,14 @@ export function SettingsPage() {
 
   return (
     <section className="settings">
-      <header className="settings__header">
-        <h2>设置</h2>
-        <button type="button" className="button" onClick={() => void load()}>
-          刷新
-        </button>
-      </header>
+      <PageHeader
+        title="设置"
+        actions={
+          <button type="button" className="button" onClick={() => void load()}>
+            刷新
+          </button>
+        }
+      />
 
       <p className="settings__notice">
         这里的值来自后端启动时的环境变量。要修改请改环境变量后<strong>重启后端</strong>——

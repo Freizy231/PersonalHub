@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 
+import { PageHeader } from '../components/PageHeader'
 import { UserTaskCard, UserTaskOriginNote } from '../components/UserTaskCard'
 import { useUserTasks, type UserTaskFilter } from '../hooks/useUserTasks'
 
@@ -35,12 +36,14 @@ export function UserTasksPage({ filter }: { filter: UserTaskFilter }) {
 
   return (
     <section className="user-tasks">
-      <header className="user-tasks__header">
-        <h2>我的任务</h2>
-        <span className="user-tasks__count">
-          {state.loading ? '加载中…' : `${state.openCount} 项未完成 · 共 ${state.total} 项`}
-        </span>
-      </header>
+      <PageHeader
+        title="我的任务"
+        actions={
+          <span className="user-tasks__count">
+            {state.loading ? '加载中…' : `${state.openCount} 项未完成 · 共 ${state.total} 项`}
+          </span>
+        }
+      />
 
       <UserTaskOriginNote />
 
