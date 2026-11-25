@@ -234,6 +234,9 @@ def build_create_task(session_factory) -> ToolDefinition:  # type: ignore[no-unt
                 description=description,
                 status=TaskStatus.OPEN.value,
                 workspace_id=context.workspace_id,
+                # 来源追溯（§5.2）：Broker 在票据校验通过后把审批 id 放进上下文。
+                # 只读或非审批路径为 None，不会写入伪造的来源。
+                created_via_approval_id=context.approval_id,
             )
             session.add(task)
             session.commit()
@@ -246,6 +249,7 @@ def build_create_task(session_factory) -> ToolDefinition:  # type: ignore[no-unt
         risk=RiskLevel.WRITE,
         handler=handler,
         display_name="创建任务",
+        impact="在你的「我的任务」里新建一条待办事项，之后可以标记完成或删除。",
         # 审批卡片据此显示「标题：…」「说明：…」，而不是 JSON（D-012）。
         argument_labels=(("title", "标题"), ("description", "说明")),
     )

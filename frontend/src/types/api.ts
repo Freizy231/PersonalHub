@@ -70,6 +70,12 @@ export interface MessageList {
   total: number
   limit: number
   offset: number
+  /** 沿着本次的 order 继续翻，是否还有下一条。
+   *
+   * `order=desc` 时表示"还有更早的消息"（会话详情页用它决定是否显示
+   * 「加载更早」）。由服务端计算，前端不从 total 推算。
+   */
+  has_more?: boolean
 }
 
 /** 与后端 MemoryOut 对应（M4）。敏感级别当前只展示，不阻断外发。 */
@@ -77,6 +83,16 @@ export interface MemorySource {
   source_type: string
   source_id: string | null
   excerpt: string
+}
+
+/** 一条"和当前候选很像"的其他候选（迭代 2 第 4 项）。
+ *
+ * 只用于提示，不是自动合并的依据——批准哪一条由用户决定。
+ */
+export interface SimilarMemory {
+  id: string
+  content: string
+  score: number
 }
 
 export interface MemoryItem {
@@ -89,6 +105,8 @@ export interface MemoryItem {
   created_at: string
   updated_at: string
   sources: MemorySource[]
+  /** 近似候选。仅待审核（PROPOSED）计算，其余状态恒为空。 */
+  similar?: SimilarMemory[]
 }
 
 export interface MemoryList {
@@ -97,6 +115,8 @@ export interface MemoryList {
   limit: number
   offset: number
   pending_count: number
+  /** 本次请求实际生效的搜索词。 */
+  query?: string
 }
 
 /** 审批记录（M6）。 */
@@ -133,11 +153,25 @@ export interface ApprovalRequestEvent {
   approval_id: string
   tool: string
   title?: string
+  /** 这次调用会发生什么（由工具自己声明）。空表示工具没有声明。 */
+  impact?: string
   summary?: ApprovalSummaryItem[]
   arguments?: Record<string, unknown>
   preview: string
   expires_in: number
 }
+
+/** 审批的终态反馈（迭代 2 第 2 项）。
+ *
+ * 卡片在用户做出决定后不能只是消失：用户需要知道"批准了、正在执行"
+ * 还是"拒绝了、什么都没发生"。这是**客户端对已收到服务端响应的确认**，
+ * 不是服务端任务状态——真正的执行结果由后续消息体现。
+ */
+export type ApprovalOutcome =
+  | { kind: 'approved'; tool: string; title: string }
+  | { kind: 'rejected'; tool: string; title: string }
+  | { kind: 'expired'; tool: string; title: string }
+  | { kind: 'failed'; tool: string; title: string; message: string }
 
 /** 作业（M7）。 */
 export interface Job {
@@ -150,6 +184,37 @@ export interface Job {
   available_at: string
   created_at: string
   updated_at: string
+  /** 输入摘要（后端从 payload 白名单字段截断生成）。不含完整用户描述。 */
+  summary?: string
+  /** 当前阶段（仅未结束的作业有值）。 */
+  stage?: string | null
+  stage_message?: string | null
+}
+
+/**
+ * 用户任务（`tasks` 表，D-013）。
+ *
+ * 这是"我记下要做的事"，不是后台作业。状态只有 OPEN / DONE，
+ * **不会**出现 RUNNING / FAILED —— 那些是 `Job` 的状态。
+ */
+export interface UserTask {
+  id: string
+  title: string
+  description: string
+  status: 'OPEN' | 'DONE'
+  created_at: string
+  updated_at: string
+  /** 由哪次审批创建；null 表示不是经审批创建的。 */
+  created_via_approval_id: string | null
+}
+
+export interface UserTaskList {
+  items: UserTask[]
+  total: number
+  limit: number
+  offset: number
+  /** 未完成数量：首页与导航角标用。 */
+  open_count: number
 }
 
 export interface TaskEventItem {
@@ -211,6 +276,20 @@ export interface CapabilityList {
   items: Capability[]
   total: number
   notice: string
+}
+
+/** 系统里实际存在的类型及数量（迭代 3）。
+ *
+ * 类型筛选只列有数据的类型：写死一份清单会留下永远筛不出东西的选项。
+ */
+export interface CapabilityTypeCount {
+  type: string
+  count: number
+}
+
+export interface CapabilityTypeList {
+  items: CapabilityTypeCount[]
+  total: number
 }
 
 export interface DependencyHealth {
@@ -322,7 +401,11 @@ export interface SimilarApp {
   matched_terms: string[]
 }
 
-/** 生成完成后的摘要（来自作业的 checkpoint）。 */
+/** 生成完成后的摘要（来自 `/apps/staging/{id}`，迭代 3 起字段完整）。
+ *
+ * 刻意**不含 html**：内容只经 `/apps/staging/{id}/content` 加载，
+ * 那条路径带 CSP 与 sandbox 响应头，是应用唯一的运行方式。
+ */
 export interface StagedApp {
   staging_id: string
   app_id: string
@@ -332,6 +415,23 @@ export interface StagedApp {
   capability: string
   size_bytes: number
   generated_at: string
+  /** 这是"对已有应用的修改建议"还是"新建"。 */
+  is_update: boolean
+  /** 修改建议基于哪个已安装版本。 */
+  base_version: string | null
+  /** 模型自述的修改原因（未经核实，界面必须标明）。 */
+  change_reason: string
+  /** 当前已安装版本；新建时为 null。 */
+  current_version: string | null
+  /** 安装后会得到的版本号——用户点"安装"之前就该知道。 */
+  next_version: string
+  /** 相对当前版本的增删行数（仅修改建议有值）。 */
+  change_stats: { added_lines: number; removed_lines: number } | null
+}
+
+export interface StagingList {
+  items: StagedApp[]
+  total: number
 }
 
 export interface InstallResult {

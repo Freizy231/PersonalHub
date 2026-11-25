@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 
+import { FlowSteps, PendingStaging, StagedPreview } from '../components/AppFlow'
 import { api } from '../services/api'
+import { computeSteps } from '../services/appFlow'
 import {
   forgetPendingJob,
   loadPendingJob,
@@ -66,6 +69,9 @@ export function AppsPage() {
     null,
   )
 
+  /** 尚未安装的生成结果（跨标签页可找回）。 */
+  const [pending, setPending] = useState<StagedApp[]>([])
+
   const [busyId, setBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null)
@@ -85,11 +91,18 @@ export function AppsPage() {
     setLoading(false)
   }, [])
 
+  const loadPending = useCallback(async () => {
+    const result = await api.apps.pending()
+    if (mounted.current && result.ok) setPending(result.data.items)
+  }, [])
+
   useEffect(() => {
     mounted.current = true
     // 与外部系统同步，结果异步返回。
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
+    // oxlint-disable-next-line react/set-state-in-effect
+    void loadPending()
     // 刷新后接上未完成的生成。这一步让"可以离开这个页面"成为真话。
     // oxlint-disable-next-line react/set-state-in-effect
     void resumePendingJob()
@@ -142,9 +155,8 @@ export function AppsPage() {
       setNotice('生成仍在后台进行。可以稍后到「活动」页查看结果。')
       return
     }
-    // 作业成功：从 staging 读取摘要。结果里已经有标题等字段，
-    // 但预览内容仍只经 iframe 加载（见文件头注释）。
-    handleFinishedJob(finished, stagingId)
+    // 作业成功：从 staging 读取摘要。预览内容仍只经 iframe 加载。
+    void handleFinishedJob(finished, stagingId)
   }
 
   /**
@@ -175,7 +187,7 @@ export function AppsPage() {
     if (TERMINAL.has(job.status)) {
       forgetPendingJob()
       setGenerating(false)
-      handleFinishedJob(job, pending.stagingId)
+      void handleFinishedJob(job, pending.stagingId)
       return
     }
 
@@ -188,11 +200,11 @@ export function AppsPage() {
       setNotice('生成仍在后台进行。可以稍后到「活动」页查看结果。')
       return
     }
-    handleFinishedJob(finished, pending.stagingId)
+    void handleFinishedJob(finished, pending.stagingId)
   }
 
   /** 终态作业的统一处理：成功展示预览，取消/失败给出原因。 */
-  function handleFinishedJob(job: JobDetail, stagingId: string) {
+  async function handleFinishedJob(job: JobDetail, stagingId: string) {
     if (job.status === 'CANCELLED') {
       setNotice('已取消这次生成，没有保存任何东西。')
       return
@@ -201,7 +213,7 @@ export function AppsPage() {
       setGenError(job.last_error ?? '生成失败，请稍后重试。')
       return
     }
-    void showStaged(stagingId, job)
+    await showStaged(stagingId)
   }
 
   /** 轮询到作业结束。返回 null 表示超时（不表示失败）。 */
@@ -224,29 +236,22 @@ export function AppsPage() {
   }
 
   /**
-   * 组装预览摘要。
+   * 读取一次生成的完整摘要（迭代 3）。
    *
-   * 字段优先取作业结果（checkpoint），拿不到的再去 `/apps/staging/{id}` 补。
-   * 之所以不直接依赖 staging 接口：它不返回 capability 与 elements。
+   * 直接使用服务端返回的字段：标题、用途、要素、版本预测与改动幅度都由后端
+   * 算好。此前这里只能拿到 title 与 size，其余字段被填成空串——
+   * 界面因此无法说明"这是什么、装上会变成哪个版本"。
    */
-  async function showStaged(stagingId: string, job: JobDetail) {
-    const result = job.runs.at(-1)?.result ?? {}
+  async function showStaged(stagingId: string) {
     const detail = await api.apps.staged(stagingId)
     if (!mounted.current) return
     if (!detail.ok) {
       setGenError(detail.message)
       return
     }
-    setStaged({
-      staging_id: stagingId,
-      app_id: String(result.app_id ?? ''),
-      title: String(result.title ?? detail.data.title),
-      purpose: '',
-      elements: [],
-      capability: '',
-      size_bytes: detail.data.size_bytes,
-      generated_at: job.updated_at,
-    })
+    setStaged(detail.data)
+    // 打开预览后重算"最近的生成"：正在看的那条要从列表里消失。
+    void loadPending()
   }
 
   async function handleCancelJob() {
@@ -269,6 +274,7 @@ export function AppsPage() {
       setPrompt('')
       setNotice(`${result.data.message} 它已经出现在下方列表里。`)
       await load()
+      await loadPending()
     } else {
       setGenError(result.message)
     }
@@ -283,6 +289,21 @@ export function AppsPage() {
     if (result.ok) {
       setStaged(null)
       setNotice('已丢弃这次生成，没有保存任何东西。')
+      await loadPending()
+    } else {
+      setGenError(result.message)
+    }
+  }
+
+  /** 丢弃"最近的生成"里的某一条（不是当前预览的那一条）。 */
+  async function handleDiscardStaging(stagingId: string) {
+    setBusyId(stagingId)
+    const result = await api.apps.discard(stagingId)
+    if (!mounted.current) return
+    setBusyId(null)
+    if (result.ok) {
+      setNotice('已丢弃这次生成，没有保存任何东西。')
+      await loadPending()
     } else {
       setGenError(result.message)
     }
@@ -327,6 +348,16 @@ export function AppsPage() {
         的沙箱中运行：不能联网、不能读取你的数据、看不到主界面。生成后先预览，确认满意再安装。
       </p>
 
+      <FlowSteps
+        steps={computeSteps({
+          hasPrompt: prompt.trim().length > 0,
+          generating,
+          failure: genError,
+          staged,
+          installing: busyId === 'install',
+        })}
+      />
+
       <form
         className="app-builder"
         onSubmit={(event) => {
@@ -356,9 +387,12 @@ export function AppsPage() {
           </button>
         </div>
         {generating && (
-          <p className="app-builder__progress" role="status">
-            生成在后台进行，可以<strong>离开这个页面</strong>，回来时结果仍在这里。
-            <span className="app-builder__stage">{stageLabel(activeJob)}</span>
+          <div className="app-builder__progress" role="status">
+            <p>
+              生成在后台进行，可以<strong>离开这个页面</strong>，回来时结果仍在这里。
+              进度也可以到 <Link to="/jobs">后台作业</Link> 里看。
+            </p>
+            <p className="app-builder__stage">{stageLabel(activeJob)}</p>
             {activeJob && (
               <button
                 type="button"
@@ -368,7 +402,7 @@ export function AppsPage() {
                 取消生成
               </button>
             )}
-          </p>
+          </div>
         )}
       </form>
 
@@ -427,40 +461,27 @@ export function AppsPage() {
       )}
 
       {staged && (
-        <div className="app-preview">
-          <div className="app-preview__meta">
-            <h3 className="app-preview__title">{staged.title}</h3>
-            {staged.purpose && <p className="app-preview__purpose">{staged.purpose}</p>}
-          </div>
-
-          <AppFrame
-            src={api.apps.stagingContentUrl(staged.staging_id)}
-            title={`预览：${staged.title}`}
-          />
-
-          <div className="app-preview__actions">
-            <button
-              type="button"
-              className="button"
-              disabled={busyId !== null}
-              onClick={() => void handleInstall()}
-            >
-              {busyId === 'install' ? '安装中…' : '安装这个应用'}
-            </button>
-            <button
-              type="button"
-              className="button"
-              disabled={busyId !== null}
-              onClick={() => void handleDiscard()}
-            >
-              丢弃
-            </button>
-            <span className="app-preview__sandbox-hint">
-              预览已经开始受沙箱限制：应用此刻就看不到你的数据。
-            </span>
-          </div>
-        </div>
+        <StagedPreview
+          staged={staged}
+          contentSrc={api.apps.stagingContentUrl(staged.staging_id)}
+          busy={busyId !== null}
+          installing={busyId === 'install'}
+          onInstall={() => void handleInstall()}
+          onDiscard={() => void handleDiscard()}
+        />
       )}
+
+      <PendingStaging
+        items={pending}
+        activeId={staged?.staging_id ?? null}
+        busyId={busyId}
+        onOpen={(stagingId) => {
+          setGenError(null)
+          setNotice(null)
+          void showStaged(stagingId)
+        }}
+        onDiscard={(stagingId) => void handleDiscardStaging(stagingId)}
+      />
 
       <h3 className="app-center__subtitle">已安装</h3>
 
@@ -543,15 +564,23 @@ export function AppsPage() {
 }
 
 /**
- * 当前阶段的中文说明。
+ * 当前阶段的中文说明（迭代 3）。
  *
- * 作业事件名来自后端（`progress` 是"需求已解析，正在生成页面"）。
- * 刻意只显示"阶段"，不显示模型输出——那是不可信内容，也不该干扰用户。
+ * 阶段来自服务端的作业事件（`progress` 事件带固定文案：正在生成页面 /
+ * 已通过安全检查）。此前只有一句笼统的"正在解析需求并生成页面"，
+ * 用户看不出进行到哪一步。
+ *
+ * 仍然**不显示**模型输出：那是不可信内容，也不该干扰用户。
  */
 function stageLabel(job: JobDetail | null): string {
   if (job === null) return '正在提交…'
   if (job.status === 'PENDING') return '排队中，马上开始…'
-  if (job.status === 'RUNNING') return '正在解析需求并生成页面…'
+
+  // 取最近一条带文案的事件：服务端的阶段说明比前端猜的准。
+  const latest = [...job.events].reverse().find((event) => event.message)
+  if (latest) return latest.message
+
+  if (job.status === 'RUNNING') return '正在生成页面…'
   return ''
 }
 

@@ -422,7 +422,7 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（697 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# 后端测试（健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
 # workspace 隔离、role 伪造防护、流式对话、取消语义（含断开即停止生成）、
 # 历史取尾部、外发审计、代理处理、记忆提取/审核/注入隔离/去重、Agent 循环、
 # 工具 Broker、参数校验、审批人话摘要、审批绑定/过期/一次性消费/越权、
@@ -431,16 +431,48 @@ cd frontend && npm run dev
 # 技能解析/校验/不执行代码/路径穿越防护/对话注入、
 # MCP 配置校验/命令白名单/失败隔离/一律 WRITE/代理链路/不可信标注、
 # 插件清单校验/组合风险传播/双层审批/路径逃逸/卸载保留目录、
+# 进程插件重启后仍为 WRITE（审计 P0-1 回归）、
 # 沙箱隔离（真实 bwrap：主目录/网络/只读/CPU/内存/密钥）、
-# 生成应用静态检查（14 条禁项）/版本管理/原子安装/回滚）
+# 生成应用静态检查（14 条禁项）/版本管理/原子安装/回滚、
+# 用户任务 API 与任务/作业隔离、作业输入摘要白名单、任务来源审批追溯）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 
-# 前端：严格类型检查 + 生产构建 + lint
-cd frontend && npm run build && npm run lint
+# 前端：严格类型检查 + 生产构建 + lint + 组件测试
+cd frontend && npm run build && npm run lint && npm test
 
 # 接口连通性
 curl -fsS http://127.0.0.1:8000/api/v1/health
+```
+
+浏览器走查（需要 Node ≥ 22 与 Edge/Chrome/Chromium；前后端已启动）：
+
+```bash
+# 首页工作台 / 我的任务 / 后台作业 / 活动 在桌面 1280 与窄屏 390 下的
+# 控制台错误、网络失败、横向溢出，并输出截图
+node scripts/verify-workbench.mjs --origin http://127.0.0.1:5173 --out /tmp/ph-shots
+
+# 用户任务闭环（标记完成 → 刷新仍完成 → 重新打开 → 两段确认删除 → 筛选视图）
+node scripts/verify-task-closure.mjs --origin http://127.0.0.1:5173
+
+# 记忆中心四视图、搜索、近似候选提示
+node scripts/verify-memory-approval.mjs --origin http://127.0.0.1:5173
+
+# 长会话「加载更早」：游标分页、无重复、阅读位置不跳变
+node scripts/verify-conversation-paging.mjs --origin http://127.0.0.1:5173 \
+  --long-id <长会话 id> --short-id <短会话 id>
+
+# 对话失败状态：可重试给「重试」，配置类错误不给（用不可达地址，零外发）
+node scripts/verify-send-state.mjs --origin http://127.0.0.1:5173 \
+  --conversation-id <会话 id> --expect retryable
+
+# 应用创建流程（零外发：脚本化 Provider 起后端，再起前端指向它）
+cd backend && uv run python ../scripts/verify_app_flow.py --port 8030 --data-dir /tmp/ph-appflow &
+cd frontend && PH_BACKEND_ORIGIN=http://127.0.0.1:8030 npm run dev -- --port 5204 &
+node scripts/verify-app-flow.mjs --origin http://127.0.0.1:5204
+
+# 能力页：类型筛选只列有数据的类型、风险级别、无 Markdown 泄漏
+node scripts/verify-capability-page.mjs --origin http://127.0.0.1:5173
 ```
 
 首次运行或升级后需要建立/更新表结构：

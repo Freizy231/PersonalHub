@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 // 开发服务器只绑定回环地址（AGENT.md §4.2：不得默认监听 0.0.0.0）。
 // 后端地址可用 PH_BACKEND_ORIGIN 覆盖，便于在备用端口上做端到端验证。
@@ -19,5 +19,13 @@ export default defineConfig({
         changeOrigin: false,
       },
     },
+  },
+  test: {
+    // 组件测试需要 DOM。用 jsdom 而不是 happy-dom：前者对表单/焦点语义更完整，
+    // 而本项目关心的是"用户能否看懂并操作"，而不是渲染速度。
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 })

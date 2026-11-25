@@ -1,6 +1,7 @@
 """能力接口（AGENT.md §4.9、M8 第 1–2 项）。
 
     GET  /api/v1/capabilities                 列出已登记能力（可检索、可筛选）
+    GET  /api/v1/capabilities/types           系统里实际存在的类型及数量
     GET  /api/v1/capabilities/{id}            获取单个能力（默认最高版本）
     GET  /api/v1/capabilities/{id}/versions   列出该能力的全部版本
     GET  /api/v1/capabilities/health/deps     依赖完整性与依赖环
@@ -60,6 +61,25 @@ class CapabilityListOut(BaseModel):
         "这里展示的是能力声明。声明了权限不代表已被授权，"
         "实际调用仍由策略引擎逐次判断，写操作还需要你确认。"
     )
+
+
+class TypeCountOut(BaseModel):
+    """一种能力类型及其实例数。"""
+
+    type: str
+    count: int
+
+
+class TypeListOut(BaseModel):
+    """系统里**实际存在**的能力类型。
+
+    前端据此渲染筛选下拉框：只列出有数据的类型。
+    此前前端写死六类（含 `workflow`），而后端从未注册过工作流能力，
+    于是"工作流"是个永远筛不出东西的选项——用户会以为功能坏了。
+    """
+
+    items: list[TypeCountOut]
+    total: int
 
 
 class DependencyHealthOut(BaseModel):
@@ -124,6 +144,24 @@ async def list_capabilities(
         items=[CapabilityOut.from_manifest(item) for item in result.items],
         total=result.total,
     )
+
+
+@router.get("/types", response_model=TypeListOut, summary="实际存在的能力类型")
+async def list_types(request: Request) -> TypeListOut:
+    """返回有能力的类型及数量（按固定顺序）。
+
+    **必须注册在 `/{capability_id}` 之前**：否则 "types" 会被当成能力 id
+    去查，返回 404 而不是类型列表。
+    """
+    registry = _registry(request)
+    counts = registry.count_by_type()
+    # 按枚举定义顺序输出，而不是字典顺序：界面下拉框的顺序要稳定。
+    ordered = [
+        TypeCountOut(type=item.value, count=counts[item.value])
+        for item in CapabilityType
+        if counts.get(item.value)
+    ]
+    return TypeListOut(items=ordered, total=sum(item.count for item in ordered))
 
 
 @router.get("/{capability_id}", response_model=CapabilityOut, summary="获取能力")

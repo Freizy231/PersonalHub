@@ -1,31 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from '../services/api'
-import type { Capability, DependencyHealth, McpServerList } from '../types/api'
-
-const TYPE_LABEL: Record<string, string> = {
-  tool: '工具',
-  mcp: 'MCP',
-  skill: '技能',
-  workflow: '工作流',
-  plugin: '插件',
-  app: '应用',
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  builtin: '内建',
-  installed: '已安装',
-  community: '社区',
-}
-
-const RUNTIME_LABEL: Record<string, string> = {
-  builtin: '随服务运行',
-  mcp: 'MCP 服务',
-  process: '独立进程',
-}
+import {
+  RISK_HINT,
+  RISK_LABEL,
+  RUNTIME_LABEL,
+  SOURCE_LABEL,
+  describePermission,
+  permissionRisk,
+  typeLabel,
+  typeOptions,
+} from '../services/capabilityDisplay'
+import type {
+  Capability,
+  CapabilityTypeCount,
+  DependencyHealth,
+  McpServerList,
+} from '../types/api'
 
 /**
- * 能力中心（AGENT.md §4.9、§7.2、M8 第 1–2 项）。
+ * 能力中心（AGENT.md §4.9、§7.2、M8 第 1–2 项；迭代 3 第 1 项）。
  *
  * 只读：展示"系统里有哪些能力"及其声明。
  * 刻意不在这一页放安装/调用按钮 —— 那需要单独的授权流程（§8.5），
@@ -37,6 +31,7 @@ const RUNTIME_LABEL: Record<string, string> = {
 export function CapabilityCenterPage() {
   const [items, setItems] = useState<Capability[]>([])
   const [notice, setNotice] = useState('')
+  const [types, setTypes] = useState<CapabilityTypeCount[]>([])
   const [health, setHealth] = useState<DependencyHealth | null>(null)
   const [mcp, setMcp] = useState<McpServerList | null>(null)
   const [query, setQuery] = useState('')
@@ -48,11 +43,12 @@ export function CapabilityCenterPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const [list, deps, mcpList] = await Promise.all([
+    const [list, typeList, deps, mcpList] = await Promise.all([
       api.capabilities.list({
         ...(query.trim() ? { q: query.trim() } : {}),
         ...(typeFilter ? { type: typeFilter } : {}),
       }),
+      api.capabilities.types(),
       api.capabilities.dependencyHealth(),
       api.mcp.servers(),
     ])
@@ -64,6 +60,8 @@ export function CapabilityCenterPage() {
     } else {
       setError(list.message)
     }
+    // 类型清单来自服务端：只列有数据的类型（见 list_types 的说明）。
+    setTypes(typeList.ok ? typeList.data.items : [])
     setHealth(deps.ok ? deps.data : null)
     setMcp(mcpList.ok ? mcpList.data : null)
     setLoading(false)
@@ -79,12 +77,17 @@ export function CapabilityCenterPage() {
     }
   }, [load])
 
+  const totalCapabilities = types.reduce((sum, item) => sum + item.count, 0)
+
   return (
     <section className="capability-center">
       <header className="capability-center__header">
         <h2>能力</h2>
         <span className="capability-center__count">
           {loading ? '加载中…' : `共 ${items.length} 个`}
+          {!loading && totalCapabilities > 0 && items.length !== totalCapabilities && (
+            <span className="capability-center__total">（系统共 {totalCapabilities} 个）</span>
+          )}
         </span>
       </header>
 
@@ -121,11 +124,12 @@ export function CapabilityCenterPage() {
           id="capability-type"
           value={typeFilter}
           onChange={(event) => setTypeFilter(event.target.value)}
+          disabled={types.length === 0}
         >
           <option value="">全部类型</option>
-          {Object.entries(TYPE_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
+          {typeOptions(types).map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>
@@ -140,7 +144,11 @@ export function CapabilityCenterPage() {
         </div>
       ) : items.length === 0 ? (
         <p className="capability-center__empty">
-          {loading ? '正在加载能力…' : '没有匹配的能力。'}
+          {loading
+            ? '正在加载能力…'
+            : typeFilter
+              ? `没有「${typeLabel(typeFilter)}」类型的能力。`
+              : '没有匹配的能力。'}
         </p>
       ) : (
         <ul className="capability-list">
@@ -154,18 +162,23 @@ export function CapabilityCenterPage() {
 }
 
 function CapabilityCard({ capability }: { capability: Capability }) {
-  const [showSchema, setShowSchema] = useState(false)
+  const risk = permissionRisk(capability.permissions)
 
   return (
     <li className="capability">
       <div className="capability__meta">
         <span className="capability__name">{capability.name}</span>
         <code className="capability__id">{capability.id}</code>
-        <span className="capability__badge">{TYPE_LABEL[capability.type] ?? capability.type}</span>
+        <span className="capability__badge">{typeLabel(capability.type)}</span>
         <span className="capability__badge">{SOURCE_LABEL[capability.source] ?? capability.source}</span>
+        <span className={`capability__risk capability__risk--${risk}`}>
+          {RISK_LABEL[risk]}
+        </span>
         <span className="capability__version">v{capability.version}</span>
       </div>
 
+      {/* 描述按**纯文本**渲染：它是给用户看的元数据，不是 Markdown 文档。
+          按文本渲染也就不会因为描述里出现 `**` 而露出星号（迭代 3 第 2 项）。 */}
       {capability.description && <p className="capability__desc">{capability.description}</p>}
 
       <div className="capability__row">
@@ -173,12 +186,20 @@ function CapabilityCard({ capability }: { capability: Capability }) {
         <span>{RUNTIME_LABEL[capability.runtime] ?? capability.runtime}</span>
       </div>
 
+      <div className="capability__row">
+        <span className="capability__label">调用影响</span>
+        <span className="capability__effect">
+          {RISK_HINT[risk]}
+          {risk === 'write' && <em className="capability__hint">（声明，非授权）</em>}
+        </span>
+      </div>
+
       {capability.permissions.length > 0 && (
         <div className="capability__row">
           <span className="capability__label">声明权限</span>
           <span className="capability__permissions">
             {capability.permissions.map((permission) => (
-              <code key={permission}>{permission}</code>
+              <code key={permission}>{describePermission(permission)}</code>
             ))}
             <em className="capability__hint">（声明，非授权）</em>
           </span>
@@ -196,11 +217,7 @@ function CapabilityCard({ capability }: { capability: Capability }) {
         </div>
       )}
 
-      <details
-        className="capability__schema"
-        open={showSchema}
-        onToggle={(event) => setShowSchema(event.currentTarget.open)}
-      >
+      <details className="capability__schema">
         <summary>查看参数结构</summary>
         <pre>{JSON.stringify(capability.input_schema, null, 2)}</pre>
       </details>

@@ -23,6 +23,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclasses_replace
 from typing import Any
 
 from app.capabilities import (
@@ -61,10 +62,13 @@ class ToolResult:
 class ApprovalRequest:
     """需要用户确认时，交给调用方的信息（用于 SSE 展示）。
 
-    同时给出三种粒度，界面按需选用（D-012）：
-    - title / summary：给人看的自然语言；
+    同时给出多种粒度，界面按需选用（D-012）：
+    - title / summary / impact：给人看的自然语言；
     - preview：多行摘要文本（兼容只显示文本的旧界面）；
     - arguments：原始参数，供"查看原始参数"折叠区核对。
+
+    `impact` 说明"这次调用会发生什么"。它由工具自己声明（`ToolDefinition.impact`），
+    不参与任何权限判断——审批的绑定语义仍由票据指纹保证。
     """
 
     approval_id: str
@@ -74,6 +78,7 @@ class ApprovalRequest:
     title: str = ""
     summary: tuple[tuple[str, str], ...] = ()
     arguments: dict[str, Any] = field(default_factory=dict)
+    impact: str = ""
 
 
 # 调用方提供：给定审批信息，等待用户决定，返回是否批准。
@@ -206,6 +211,7 @@ class ToolBroker:
                 title=definition.title,
                 summary=tuple(definition.summarize_arguments(arguments)),
                 arguments=arguments,
+                impact=definition.impact,
             )
         )
 
@@ -232,7 +238,11 @@ class ToolBroker:
                 )
                 return self._result(name, call_id, "denied", exc.code, str(exc))
 
-        return await self._run(definition, name, call_id, arguments, context)
+        # 票据已消费：这次执行确实经过用户确认。把审批 id 交给工具，
+        # 让写入的数据能追溯到"哪一次确认"（§5.2）。用一个新上下文而不是
+        # 直接改写传入对象——ToolContext 是 frozen，且调用方可能复用同一实例。
+        approved_context = dataclasses_replace(context, approval_id=approval_id)
+        return await self._run(definition, name, call_id, arguments, approved_context)
 
     async def _run(
         self,

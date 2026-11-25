@@ -41,6 +41,10 @@ class ToolContext:
 
     workspace_id: str
     conversation_id: str
+    # 本次调用所依据的审批记录 id。仅当调用确实经过用户审批时由 Broker 填入，
+    # 用于把写入的数据追溯到"哪一次确认"（§5.2 任务必须可追踪）。
+    # 默认 None：只读调用或非审批路径不会带它。
+    approval_id: str | None = None
 
 
 class ToolHandler(Protocol):
@@ -77,6 +81,13 @@ class ToolDefinition:
     handler: ToolHandler = field(repr=False)
     # 给用户看的工具名（"创建任务"）。审批卡片用它，而不是内部标识 create_task。
     display_name: str = ""
+    # 这次调用**会发生什么**，一句话，面向普通用户。
+    #
+    # 为什么由工具自己声明：只有工具知道自己的真实副作用（创建一条任务 /
+    # 写一个应用新版本 / 在沙箱里执行外部代码）。放在前端映射表里，
+    # 新增工具时必然漏写，而漏写的后果是用户在不知道自己批准了什么的情况下点了批准。
+    # 与 display_name 一样，它是**说明**，不参与任何权限判断。
+    impact: str = ""
     # 参数名 -> 中文标签。审批摘要据此输出"标题：…"，而不是 JSON 键值对。
     argument_labels: tuple[tuple[str, str], ...] = ()
     # 自定义审批摘要（可选）。参数本身不可读时用它，例如一个工具的参数是

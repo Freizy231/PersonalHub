@@ -29,9 +29,9 @@
 
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 from typing import Any
 
+from app.builder.diff import diff_counts
 from app.builder.staging import AppStore, BuilderError
 from app.builder.validate import MAX_APP_BYTES, validate_app
 from app.capabilities import (
@@ -155,7 +155,7 @@ def build_propose_app_change(store: AppStore) -> ToolDefinition:  # type: ignore
             "app_id": {"type": "string", "description": "要修改的应用 id"},
             "new_html": {
                 "type": "string",
-                "description": "修改后的**完整**单文件 HTML（不是补丁，是全量替换）",
+                "description": "修改后的完整单文件 HTML（不是补丁，而是全量替换）",
             },
             "reason": {
                 "type": "string",
@@ -225,7 +225,7 @@ def build_propose_app_change(store: AppStore) -> ToolDefinition:  # type: ignore
             "base_version": app.version,
             "status": "pending_install",
             "notice": (
-                "修改已提交检查通过，但**还没有生效**。"
+                "修改已提交并通过检查，但还没有生效。"
                 "请告诉用户在「应用」页预览并点击安装后才会成为新版本。"
             ),
         }
@@ -259,7 +259,7 @@ def build_propose_app_change(store: AppStore) -> ToolDefinition:  # type: ignore
             except ValueError:
                 old = None
             if old:
-                added, removed = _diff_counts(old, new_html)
+                added, removed = diff_counts(old, new_html)
                 rows.append(("改动", f"新增 {added} 行，删除 {removed} 行"))
         if reason:
             # 标明这是模型的话：用户不该把"我改好了"当成事实。
@@ -270,33 +270,19 @@ def build_propose_app_change(store: AppStore) -> ToolDefinition:  # type: ignore
         name="propose_app_change",
         description=(
             "提交一份修改后的完整应用 HTML，等待用户批准。"
-            "必须先用 read_app 读取当前版本，提交的是**完整文件**而不是补丁。"
+            "必须先用 read_app 读取当前版本，提交的是完整文件而不是补丁。"
             "审批通过后还需要用户在应用页点击安装才会生效。"
         ),
         parameters=schema,
         risk=RiskLevel.WRITE,
         handler=handler,
         display_name="修改应用",
+        impact=(
+            "把修改后的版本放进临时区供你预览；当前已安装的版本不会立刻改变，"
+            "还需要你在「应用」页点击安装。"
+        ),
         argument_summarizer=summarize,
     )
-
-
-def _diff_counts(old: str, new: str) -> tuple[int, int]:
-    """新旧内容的增删行数。
-
-    用行级比较（不是字符级）：用户判断"改得多不多"看的是行数，
-    字符级差异对这种 HTML 基本没有信息量。
-    """
-    old_lines = old.splitlines()
-    new_lines = new.splitlines()
-    added = removed = 0
-    matcher = SequenceMatcher(None, old_lines, new_lines, autojunk=False)
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag in ("replace", "delete"):
-            removed += i2 - i1
-        if tag in ("replace", "insert"):
-            added += j2 - j1
-    return added, removed
 
 
 def _now_iso() -> str:

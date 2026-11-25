@@ -128,7 +128,7 @@ class TestList:
 
         body = client.get(_messages_url(cid)).json()
 
-        assert body == {"items": [], "total": 0, "limit": 100, "offset": 0}
+        assert body == {"items": [], "total": 0, "limit": 100, "offset": 0, "has_more": False}
 
     def test_chronological_order(self, client: TestClient) -> None:
         cid = _create(client)

@@ -48,6 +48,9 @@ MAX_VERSIONS_PER_APP = 10
 
 _SAFE_FILENAME = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
 
+# staging 目录名与 staging_path() 的校验保持一致（UUID 十六进制）。
+_SAFE_STAGING_ID = re.compile(r"^[a-z0-9]{8,64}$")
+
 
 class BuilderError(RuntimeError):
     """构建或安装失败。message 面向用户，不含内部路径细节。"""
@@ -125,6 +128,39 @@ class AppStore:
             return target.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return None
+
+    def list_staging(self) -> list[tuple[str, dict]]:  # type: ignore[type-arg]
+        """列出 staging 里的生成结果，最新的在前。
+
+        返回 `(staging_id, meta)`。用于"最近的生成"入口：生成结果在用户
+        点安装之前一直在磁盘上（1 小时后才清理），但此前界面只能通过
+        sessionStorage 记住**当前标签页**的那一次。换个标签页、换个浏览器、
+        或者关掉页面，结果就找不到了——尽管它还在。
+
+        目录名先过一遍白名单：staging 目录可能被别的东西写进过，
+        不合法的一律跳过，不让它进入接口响应。
+        """
+        if not self.staging_dir.is_dir():
+            return []
+
+        entries: list[tuple[float, str, dict]] = []  # type: ignore[type-arg]
+        for child in self.staging_dir.iterdir():
+            if not child.is_dir() or not _SAFE_STAGING_ID.match(child.name):
+                continue
+            meta = self.read_staging_meta(child.name)
+            if not isinstance(meta, dict):
+                continue
+            # 没有内容文件的目录不是可预览的结果（写了一半就中断）。
+            if not (child / APP_FILENAME).is_file():
+                continue
+            try:
+                mtime = child.stat().st_mtime
+            except OSError:
+                continue
+            entries.append((mtime, child.name, meta))
+
+        entries.sort(key=lambda item: (-item[0], item[1]))
+        return [(staging_id, meta) for _, staging_id, meta in entries]
 
     def discard_staging(self, staging_id: str) -> None:
         """丢弃一次生成尝试。失败不影响其它内容。"""

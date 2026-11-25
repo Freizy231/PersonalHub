@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personal Hub — 功能与前端设计报告</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --border: #d9d9de;
+    --text: #1b1b1f;
+    --muted: #5c5c66;
+    --accent: #2f6f4f;
+    --warn: #7d5200;
+    --err: #a12a2a;
+    --radius: 10px;
+    --xs: .75rem; --sm: .8125rem; --base: .875rem; --md: .9375rem; --lg: 1.0625rem; --xl: 1.25rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a; --surface: #1e1e24; --border: #32323c; --text: #ececf1;
+      --muted: #a0a0ad; --accent: #6fbf94; --warn: #e0b060; --err: #f08a8a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 64px;
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+    line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { padding: 40px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+  h1 { margin: 0 0 6px; font-size: 1.9rem; letter-spacing: -.01em; }
+  .sub { margin: 0; color: var(--muted); font-size: var(--md); }
+  .meta { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; font-size: var(--xs); color: var(--muted); }
+  .meta span { padding: 2px 9px; border: 1px solid var(--border); border-radius: 20px; }
+  h2 { margin: 44px 0 14px; font-size: var(--xl); }
+  h2:first-of-type { margin-top: 0; }
+  h3 { margin: 26px 0 10px; font-size: var(--lg); }
+  p { margin: 0 0 12px; font-size: var(--md); }
+  code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .88em;
+         padding: .1em .35em; border-radius: 4px; background: color-mix(in srgb, var(--border) 45%, transparent); }
+  pre { margin: 12px 0; padding: 14px 16px; overflow-x: auto; background: var(--surface);
+        border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--sm); line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 18px 0; }
+  .stat { padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .stat__n { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .stat__l { font-size: var(--xs); color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: var(--base); }
+  th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-weight: 600; font-size: var(--sm); color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  .card { padding: 14px 16px; background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius); margin: 14px 0; }
+  .card--ok { border-left: 3px solid var(--accent); }
+  .card--warn { border-left: 3px solid var(--warn); }
+  .card--err { border-left: 3px solid var(--err); }
+  .card__title { margin: 0 0 6px; font-weight: 600; font-size: var(--md); }
+  .card p:last-child { margin-bottom: 0; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: var(--xs); }
+  .tag--ok { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .tag--warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .tag--err { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); }
+  .tag--mute { background: color-mix(in srgb, var(--border) 50%, transparent); color: var(--muted); }
+  ul, ol { margin: 0 0 12px; padding-left: 1.3em; font-size: var(--md); }
+  li { margin-bottom: 6px; }
+  .note { padding: 12px 14px; background: color-mix(in srgb, var(--border) 28%, transparent);
+          border-radius: 8px; font-size: var(--base); color: var(--muted); }
+  footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border);
+           font-size: var(--sm); color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Personal Hub — 功能与前端设计报告</h1>
+  <p class="sub">本地优先的个人 AI 环境 · 开发状态、实现情况与界面走查</p>
+  <div class="meta">
+    <span>日期 2026-11-24</span>
+    <span>提交 d7dc718</span>
+    <span>后端 897 项测试通过</span>
+    <span>阶段 A/B/C 完成 · D 提案待批</span>
+  </div>
+</header>
+
+<h2>一、总览</h2>
+
+<div class="stats">
+  <div class="stat"><div class="stat__n">897</div><div class="stat__l">后端测试</div></div>
+  <div class="stat"><div class="stat__n">44</div><div class="stat__l">API 端点</div></div>
+  <div class="stat"><div class="stat__n">10</div><div class="stat__l">数据表</div></div>
+  <div class="stat"><div class="stat__n">10</div><div class="stat__l">前端页面</div></div>
+  <div class="stat"><div class="stat__n">13.6k</div><div class="stat__l">后端代码行</div></div>
+  <div class="stat"><div class="stat__n">9.8k</div><div class="stat__l">测试代码行</div></div>
+</div>
+
+<p>42 次提交，其中 26 次 feat、4 次 fix、11 次 docs。依赖保持精简：后端 6 个直接依赖
+（FastAPI / SQLAlchemy / Alembic / httpx / uvicorn / mcp），前端 5 个。</p>
+
+<h2>二、功能实现情况</h2>
+
+<h3>已完成的里程碑</h3>
+
+<table>
+  <tr><th>里程碑</th><th>内容</th><th>关键实现</th><th>状态</th></tr>
+  <tr>
+    <td>M0–M1</td><td>仓库审计与骨架</td>
+    <td>uv 环境、健康检查、回环绑定、一键启动脚本</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M2</td><td>SQLite 持久化</td>
+    <td>会话/消息表、Alembic 迁移、分页 API、前端路由</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M3</td><td>AI Workspace</td>
+    <td>OpenAI 兼容适配器、SSE 流式输出、取消语义、外发审计</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M4</td><td>记忆引擎</td>
+    <td>候选提取、审核/拒绝/修改/删除、来源追踪、内容指纹去重</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M5</td><td>Agent 与只读工具</td>
+    <td>Agent Loop（最大 4 轮）、Tool Registry、Tool Broker</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M6</td><td>治理与审批</td>
+    <td>Policy Engine、审批指纹、TTL、会话级授权、一次性消费</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M7</td><td>持久化任务运行时</td>
+    <td>job_queue / task_runs / task_events、Worker、退避重试、崩溃恢复</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M8</td><td>能力运行时</td>
+    <td>统一 Manifest、Skills、MCP Client、声明式插件、bubblewrap 进程插件</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+  <tr>
+    <td>M9</td><td>自然语言创建应用</td>
+    <td>需求解析 → 生成 → 静态检查 → 沙箱预览 → 批准安装 → 回滚</td>
+    <td><span class="tag tag--ok">完成</span></td>
+  </tr>
+</table>
+
+<h3>M9 的核心链路</h3>
+
+<pre><code>用户描述
+  → 需求解析（结构校验 + 范围筛查）
+  → 能力检索（已有应用可满足则提示复用，不盲目生成）
+  → 后台作业生成（两次模型调用，不阻塞）
+  → 静态检查（14 条禁项，不通过不落盘）
+  → staging 预览（不透明 iframe + CSP）
+  → 用户点击安装 → 新版本，旧版本保留可回滚</code></pre>
+
+<div class="card card--ok">
+  <p class="card__title">已实测的安全边界</p>
+  <p>用故意越界的探针应用（直接装进 AppStore，绕过静态检查）在无头 Edge 中验证：</p>
+  <table>
+    <tr><th>尝试</th><th>结果</th></tr>
+    <tr><td><code>window.parent.document</code></td><td>SecurityError（origin 为 null）</td></tr>
+    <tr><td><code>localStorage</code> / <code>cookie</code></td><td>SecurityError（缺 allow-same-origin）</td></tr>
+    <tr><td><code>window["fe"+"tch"](...)</code></td><td>TypeError（被 CSP 阻断）</td></tr>
+    <tr><td>应用自身脚本</td><td>正常运行</td></tr>
+  </table>
+  <p>网络面板零外部请求。这套验证已固化为 pytest（<code>test_apps_sandbox.py</code>）。</p>
+</div>
+
+<h3>规范中未归入里程碑、已补齐的两项</h3>
+
+<div class="card">
+  <p class="card__title">Context Engine（§4.5）</p>
+  <p>此前把所有已批准记忆全量塞进上下文。现在按<strong>相关性</strong>排序、去重、按 2000 字符预算裁剪，
+  每条标注类型/敏感度/可信度。SECRET 级别的记忆<strong>永不注入</strong>（即使已批准）。
+  实测：问"帮我写 TypeScript 代码"只注入那一条；问"推荐个颜色"无字面相关时回退 4 条背景。</p>
+</div>
+
+<div class="card">
+  <p class="card__title">Settings 页面（§2.5 第 6 项）</p>
+  <p>只读：模型、数据目录、记忆策略、数据概览、系统信息。密钥只显示"是否已配置"与变量名。
+  端口取 ASGI <code>scope["server"]</code> 的真实值——实测发现直接读配置默认为 8000，
+  而进程实际跑在 8022。</p>
+</div>
+
+<h3>尚未实现</h3>
+
+<table>
+  <tr><th>项</th><th>规范位置</th><th>原因 / 状态</th></tr>
+  <tr><td>备份、导出、应用包</td><td>M10 第一批</td><td>提案已出，待批准</td></tr>
+  <tr><td>分享、社区注册表、设备同步</td><td>M10 第二、三批</td><td>涉外部服务与数据外发，待决定</td></tr>
+  <tr><td>Data Egress Gateway</td><td>§4.12</td><td>D-002 明确不实现，只记元数据审计</td></tr>
+  <tr><td>OS Keychain 存密钥</td><td>§4.6</td><td>D-003 改用环境变量</td></tr>
+  <tr><td>FTS5 / 向量检索</td><td>§3.2</td><td>现为关键词匹配，规范标为后续</td></tr>
+  <tr><td>Workflow Runtime、AI Orchestrator</td><td>§3.3 / §4.7</td><td>未实现</td></tr>
+  <tr><td>任务状态语义补全</td><td>§7.3</td><td>当前 5 态，规范列了 7 态（WAITING_APPROVAL / PAUSED）</td></tr>
+  <tr><td>统一组件体系（复杂度第 3 级）</td><td>M9 之外</td><td>需重做静态检查与构建流程，未排期</td></tr>
+</table>
+
+<h2>三、前端设计</h2>
+
+<h3>结构</h3>
+<p>10 个页面、14 个组件、5 个 hooks，纯 CSS（2591 行），无 UI 框架。导航包含：
+总览 / 会话 / 记忆 / 任务 / 活动 / 能力 / 插件 / 应用 / 设置。</p>
+
+<h3>走查评分：78 / 100</h3>
+
+<p>实测方式：CDP 驱动无头 Edge，逐页截图 + WCAG 对比度计算（含半透明背景复合）+
+24px 触摸目标扫描 + 390px 横向溢出检测 + 键盘焦点检查。</p>
+
+<div class="card card--ok">
+  <p class="card__title">做得好的三点</p>
+  <ul>
+    <li><strong>语义色系统一致</strong>：9 个页面只有 2 处对比度未达标，且均为 4.45:1 与 3.97:1 的边缘值。</li>
+    <li><strong>空状态不是事后补的</strong>："还没有安装任何应用。上面生成一个试试"——给了下一步动作。</li>
+    <li><strong>窄屏无横向溢出</strong>：390px 下 6 个页面全部 scrollWidth == 390。</li>
+  </ul>
+</div>
+
+<h3>问题清单</h3>
+
+<table>
+  <tr><th>级别</th><th>问题</th><th>实测证据</th><th>修复</th></tr>
+  <tr>
+    <td><span class="tag tag--err">P0</span></td>
+    <td>总览页是健康检查面板，没有告诉用户能做什么</td>
+    <td>整页可视内容不足 400px，下方约 500px 空白</td>
+    <td>加"从这里开始"卡片（开新会话 / 去审核记忆 / 做个应用），状态卡降为页脚徽标</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--err">P0</span></td>
+    <td>任务页标题是内部标识 <code>generate_app</code></td>
+    <td>两条任务完全相同，无法区分是哪个应用</td>
+    <td>用 checkpoint 里的 title；无则用 jobLabels 中文映射</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--warn">P1</span></td>
+    <td>字号系统失控：21 种字号</td>
+    <td><code>0.74–1.9rem</code>，其中 0.82/0.84/0.85/0.86 肉眼无差别</td>
+    <td>收敛到 6 档 token</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--warn">P1</span></td>
+    <td>能力页漏出未渲染的 Markdown</td>
+    <td>描述显示为"提交的是**完整文件**而不是补丁"</td>
+    <td>去掉描述里的 <code>**</code>（不要给不可信文本加 HTML 渲染）</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--warn">P1</span></td>
+    <td>"详情"按钮 27×22px</td>
+    <td>低于 WCAG AA 的 24×24；全站唯一一处</td>
+    <td><code>.job__actions button</code> 加 <code>min-height: 28px</code></td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--warn">P1</span></td>
+    <td>记忆页三条近似内容无任何提示</td>
+    <td>模型重复提取，用户不知该批哪条</td>
+    <td>列表标出"与上面第 N 条相近"，或提供合并</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--mute">P2</span></td>
+    <td>"3 条待审核" 4.45:1、"已完成" 3.97:1</td>
+    <td>差 0.05 与 0.53 达标</td>
+    <td><code>--warn</code> 调 <code>#7d5200</code>，<code>--ok</code> 调 <code>#276b48</code></td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--mute">P2</span></td>
+    <td>会话链接用浏览器默认蓝 <code>#0000EE</code></td>
+    <td>全站唯一脱离 token 的颜色</td>
+    <td>改 <code>var(--accent)</code></td>
+  </tr>
+  <tr>
+    <td><span class="tag tag--mute">P2</span></td>
+    <td>页脚硬编码"M9 阶段"</td>
+    <td>每次里程碑都要改代码</td>
+    <td>读 <code>/settings</code> 的 version，或删掉</td>
+  </tr>
+</table>
+
+<div class="card card--ok">
+  <p class="card__title">"AI 味"反模式：命中 0 项</p>
+  <p>没有紫蓝渐变、卡片堆砌、emoji 当图标、模板胶囊按钮、fadeInUp 动效。
+  配色是克制灰阶 + 一个深绿强调色，圆角统一 8px。</p>
+</div>
+
+<h2>四、结论</h2>
+
+<p><strong>功能侧</strong>：阶段 A、B、C 全部完成，897 项测试通过，核心链路
+（对话 → 记忆 → 工具 → 审批 → 后台任务 → 能力 → 生成应用）端到端可跑。
+安全边界在真实浏览器中验证过，不是纸面推断。</p>
+
+<p><strong>界面侧</strong>：78 分，属于"良好"——修完两个 P0 就可以面向自己日常使用。
+最大的问题不在视觉细节，而在<strong>总览页没有承担入口职责</strong>和
+<strong>任务页把实现细节暴露给用户</strong>。这两项都不需要设计能力，只是"把已有数据展示对"。</p>
+
+<p><strong>建议的下一步</strong>：先修两个 P0（预计各 1 小时内），再决定 M10 的四个问题
+（社区 / 同步 / 签名算法 / 备份口令），然后开始第一批备份与导出。</p>
+
+<footer>
+  <p>报告基于提交 d7dc718。所有数字为实测：测试数来自 <code>pytest</code>、
+  端点与代码行来自源码统计、走查结论来自 CDP 实测而非目测。</p>
+  <p>走查边界：读屏软件播报顺序、色盲模式信息传递未验证（无相应工具）；
+  对比度为计算值，不从像素取样。</p>
+</footer>
+
+</div>
+</body>
+</html>

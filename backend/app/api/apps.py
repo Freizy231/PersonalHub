@@ -41,6 +41,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import SessionDep
+from app.builder.diff import diff_counts
 from app.builder.jobs import GENERATE_APP_JOB
 from app.builder.requirement import RequirementError, check_scope
 from app.builder.staging import AppStore, BuilderError
@@ -52,6 +53,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/apps", tags=["apps"])
 
 MAX_REQUEST_CHARS = 1_000
+
+# 「最近的生成」最多列多少条。再多已是历史残留，由启动清理回收。
+MAX_STAGING_LIST = 20
 
 # 应用内容的响应头。**所有**返回 HTML 的地方都必须用它。
 #
@@ -120,7 +124,25 @@ class GenerateAcceptedOut(BaseModel):
     skipped: bool = False
 
 
+class ChangeStatsOut(BaseModel):
+    """相对当前已安装版本的改动幅度（仅"修改建议"有值）。"""
+
+    added_lines: int
+    removed_lines: int
+
+
 class StagedAppOut(BaseModel):
+    """一次生成的完整摘要（迭代 3：应用创建流程）。
+
+    这些字段在 staging 的 `requirement.json` 里本来就有（生成作业写入），
+    但此前接口只返回其中三个，界面因此无法说明"这是什么、改了多大的幅度、
+    装上会变成哪个版本"。现在一次性给全，界面不再需要猜。
+
+    **不含 `html`**：内容只经 `/staging/{id}/content` 下发——那条路径带
+    CSP/sandbox 响应头，是应用唯一的运行方式。把整段 HTML 放进 JSON，
+    既没有消费者，又让响应体大了一个数量级。
+    """
+
     staging_id: str
     app_id: str
     title: str
@@ -130,12 +152,26 @@ class StagedAppOut(BaseModel):
     size_bytes: int
     generated_at: str
 
+    # ---- 来源与版本（迭代 3 新增）----
+    # 这次生成是"新建"还是"对已有应用的修改建议"（由 propose_app_change 写入）。
+    is_update: bool = False
+    # 修改建议基于哪个已安装版本。
+    base_version: str | None = None
+    # 模型自述的修改原因（未经核实，界面必须标明）。
+    change_reason: str = ""
+    # 当前已安装版本（新建时为 None）。
+    current_version: str | None = None
+    # 安装后会得到的版本号。用户需要在点"安装"之前就知道。
+    next_version: str = ""
+    # 相对当前版本的增删行数（仅修改建议有值）。
+    change_stats: ChangeStatsOut | None = None
 
-class PreviewOut(BaseModel):
-    staging_id: str
-    html: str
-    title: str
-    size_bytes: int
+
+class StagingListOut(BaseModel):
+    """尚未安装的生成结果（关掉页面后仍可找回）。"""
+
+    items: list[StagedAppOut]
+    total: int
 
 
 class AppOut(BaseModel):
@@ -332,8 +368,86 @@ def _similar_apps(request: Request, text: str) -> list[SimilarAppOut]:
     ]
 
 
-@router.get("/staging/{staging_id}", response_model=PreviewOut, summary="读取生成结果")
-async def read_staging(request: Request, staging_id: str) -> PreviewOut:
+def _staged_out(store: AppStore, staging_id: str, meta: dict) -> StagedAppOut:  # type: ignore[type-arg]
+    """把 staging meta 组装成界面需要的完整摘要（迭代 3）。
+
+    meta 由生成作业或 `propose_app_change` 写入，是**我们自己的数据**，
+    但仍按不可信输入处理：字段类型不对就用安全默认值，不让一个坏 meta
+    让整个接口 500（用户会以为"应用坏了"）。
+
+    版本预测在这里算而不是在安装时才算：用户需要在点"安装"**之前**
+    知道自己会得到 1.0.1 还是 1.0.0。
+    """
+    html = store.read_staging(staging_id) or ""
+    app_id = str(meta.get("app_id", ""))
+    title = str(meta.get("title", "")) or app_id
+
+    elements = meta.get("elements")
+    elements_list = [str(item) for item in elements] if isinstance(elements, list) else []
+
+    existing = None
+    if app_id:
+        try:
+            existing = store.get(app_id)
+        except ValueError:
+            existing = None
+
+    base_version = meta.get("base_version")
+    base_version = str(base_version) if base_version else None
+    change_reason = str(meta.get("change_reason", "") or "")
+
+    # 修改建议：由 propose_app_change 写入 base_version。
+    is_update = bool(base_version) and existing is not None
+
+    change_stats = None
+    if is_update and base_version:
+        try:
+            old_html = store.read_app(app_id, base_version)
+        except (ValueError, BuilderError):
+            old_html = None
+        if old_html is not None:
+            added, removed = diff_counts(old_html, html)
+            change_stats = ChangeStatsOut(added_lines=added, removed_lines=removed)
+
+    return StagedAppOut(
+        staging_id=staging_id,
+        app_id=app_id,
+        title=title,
+        purpose=str(meta.get("purpose", "") or ""),
+        elements=elements_list,
+        capability=str(meta.get("capability", "") or ""),
+        size_bytes=len(html.encode("utf-8")),
+        generated_at=str(meta.get("generated_at", "") or ""),
+        is_update=is_update,
+        base_version=base_version if is_update else None,
+        change_reason=change_reason if is_update else "",
+        current_version=existing.version if existing is not None else None,
+        next_version=_next_version(existing),
+        change_stats=change_stats,
+    )
+
+
+@router.get("/staging", response_model=StagingListOut, summary="列出未安装的生成结果")
+async def list_staging(request: Request) -> StagingListOut:
+    """最近的生成结果（迭代 3）。
+
+    生成结果在用户点安装之前一直在磁盘上（超过 1 小时才被启动清理回收）。
+    之前界面只能通过 sessionStorage 记住**当前标签页**的那一次，
+    换个标签页或关掉页面就找不回来了。这个入口让"未安装的结果"可被发现。
+
+    只返回元数据，不含 HTML（内容仍只经 `/staging/{id}/content`）。
+    上限 20 条：再多的已经是历史残留，启动清理会回收。
+    """
+    store = _store(request)
+    items = [
+        _staged_out(store, staging_id, meta)
+        for staging_id, meta in store.list_staging()[:MAX_STAGING_LIST]
+    ]
+    return StagingListOut(items=items, total=len(items))
+
+
+@router.get("/staging/{staging_id}", response_model=StagedAppOut, summary="读取生成结果摘要")
+async def read_staging(request: Request, staging_id: str) -> StagedAppOut:
     store = _store(request)
     meta = store.read_staging_meta(staging_id)
     html = store.read_staging(staging_id)
@@ -343,12 +457,7 @@ async def read_staging(request: Request, staging_id: str) -> PreviewOut:
             code="APP_STAGING_NOT_FOUND",
             message="这次生成已经结束或已被清理，请重新生成。",
         )
-    return PreviewOut(
-        staging_id=staging_id,
-        html=html,
-        title=str(meta.get("title", "")),
-        size_bytes=len(html.encode("utf-8")),
-    )
+    return _staged_out(store, staging_id, meta)
 
 
 @router.get(

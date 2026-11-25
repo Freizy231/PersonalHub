@@ -1,9 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { ApprovalCard } from '../components/ApprovalCard'
 import { MessageComposer } from '../components/MessageComposer'
 import { MessageList } from '../components/MessageList'
+import { EarlierMessages } from '../components/EarlierMessages'
+import { SendStatusBar } from '../components/SendStatusBar'
 import { ToolActivityList } from '../components/ToolActivityList'
 import { useConversationDetail } from '../hooks/useConversationDetail'
 
@@ -18,18 +20,30 @@ export function ConversationDetailPage() {
     streamingText,
     toolActivity,
     pendingApproval,
+    approvalOutcome,
     decideApproval,
     dismissApproval,
     deciding,
     sending,
-    sendError,
+    sendState,
     send,
+    retry,
+    dismissFailure,
     cancel,
     reload,
+    loadEarlier,
   } = useConversationDetail(conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
   /** 用户是否贴着底部阅读。往上翻看历史时为 false，此时不要把人拽回底部。 */
   const stickToBottom = useRef(true)
+
+  /**
+   * 加载更早之前记下文档高度与滚动位置，加载后按差值补回。
+   *
+   * 不这样做的话，前插内容会把当前阅读位置往下推——用户点"加载更早"，
+   * 视线里的那句话会突然跳走（浏览器默认保持 scrollTop，而内容变长了）。
+   */
+  const restoreScroll = useRef<{ height: number; top: number } | null>(null)
 
   useEffect(() => {
     const onScroll = () => {
@@ -49,6 +63,25 @@ export function ConversationDetailPage() {
       bottomRef.current?.scrollIntoView({ block: 'end' })
     }
   }, [state.messages.length, streamingText, pendingApproval, toolActivity.length])
+
+  // 前插完成后补回滚动位置（在浏览器绘制前，避免闪烁）。
+  useLayoutEffect(() => {
+    const saved = restoreScroll.current
+    if (!saved) return
+    restoreScroll.current = null
+    const delta = document.documentElement.scrollHeight - saved.height
+    if (delta > 0) {
+      window.scrollTo({ top: saved.top + delta })
+    }
+  }, [state.messages.length])
+
+  function handleLoadEarlier() {
+    restoreScroll.current = {
+      height: document.documentElement.scrollHeight,
+      top: window.scrollY,
+    }
+    void loadEarlier()
+  }
 
   if (state.notFound) {
     return (
@@ -88,8 +121,9 @@ export function ConversationDetailPage() {
             key={pendingApproval.approval_id}
             request={pendingApproval}
             busy={deciding}
+            outcome={approvalOutcome}
             onDecide={(decision, remember) => void decideApproval(decision, remember)}
-            onExpired={dismissApproval}
+            onExpire={dismissApproval}
           />
         )}
       </>
@@ -108,20 +142,29 @@ export function ConversationDetailPage() {
       {state.loading && state.messages.length === 0 ? (
         <p className="messages__empty">正在加载消息…</p>
       ) : (
-        <MessageList
-          messages={state.messages}
-          streamingText={streamingText}
-          liveTurn={liveTurn}
-        />
+        <>
+          <EarlierMessages
+            visible={state.messages.length > 0}
+            hasEarlier={state.hasEarlier}
+            loading={state.loadingEarlier}
+            error={state.earlierError}
+            onLoad={handleLoadEarlier}
+          />
+          <MessageList
+            messages={state.messages}
+            streamingText={streamingText}
+            liveTurn={liveTurn}
+          />
+        </>
       )}
 
       <div ref={bottomRef} />
 
-      {sendError && (
-        <div className="alert alert--error" role="alert">
-          <p>{sendError}</p>
-        </div>
-      )}
+      <SendStatusBar
+        state={sendState}
+        onRetry={() => void retry()}
+        onDismiss={dismissFailure}
+      />
 
       <MessageComposer onSend={send} onCancel={cancel} sending={sending} />
     </section>

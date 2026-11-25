@@ -21,7 +21,9 @@ REQUEST_ID_HEADER = "X-Request-ID"
 logger = logging.getLogger(__name__)
 
 
-def error_body(code: str, message: str, request_id: str, details: Any = None) -> dict[str, Any]:
+def error_body(
+    code: str, message: str, request_id: str, details: Any = None, *, retryable: bool | None = None
+) -> dict[str, Any]:
     body: dict[str, Any] = {
         "error": {
             "code": code,
@@ -31,6 +33,10 @@ def error_body(code: str, message: str, request_id: str, details: Any = None) ->
     }
     if details is not None:
         body["error"]["details"] = details
+    if retryable is not None:
+        # 只有接口明确表态时才带这个字段：缺省时前端按"不可重试"处理，
+        # 不会因为一个接口没填就给出一个点了必然失败的按钮。
+        body["error"]["retryable"] = retryable
     return body
 
 
@@ -48,12 +54,19 @@ class PublicMessageError(HTTPException):
 
     使用约束：message 必须是**研发预先写死**的固定文案，
     绝不能拼接用户输入、异常正文、文件路径或供应商原始响应。
+
+    `retryable`：同一个请求原样重发一次是否可能成功。只对"可能需要重试"
+    的接口（对话流）有意义，缺省 None 表示不表态。前端据此决定是否显示
+    重试按钮——没有它，前端只能自己维护一份分类表，两份表迟早漂移。
     """
 
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self, status_code: int, code: str, message: str, *, retryable: bool | None = None
+    ) -> None:
         super().__init__(status_code=status_code, detail=message)
         self.public_code = code
         self.public_message = message
+        self.retryable = retryable
 
 
 def _http_status_code(exc: StarletteHTTPException) -> tuple[str, str]:
@@ -83,7 +96,12 @@ def install_exception_handlers(app: FastAPI) -> None:
             # 仅这类异常允许把预先写死的安全文案透传给用户。
             return JSONResponse(
                 status_code=exc.status_code,
-                content=error_body(exc.public_code, exc.public_message, _request_id(request)),
+                content=error_body(
+                    exc.public_code,
+                    exc.public_message,
+                    _request_id(request),
+                    retryable=exc.retryable,
+                ),
             )
 
         code, message = _http_status_code(exc)

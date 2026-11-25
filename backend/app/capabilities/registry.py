@@ -182,6 +182,18 @@ class CapabilityRegistry:
             items.append(manifest)
         return SearchResult(items=tuple(items), total=len(items))
 
+    def count_by_type(self) -> dict[str, int]:
+        """每种类型有多少个能力（只含**实际存在**的类型）。
+
+        界面据此渲染类型筛选：不列空类型。写死一份类型清单在前端时，
+        新增类型会漏、删除类型会留下永远筛不出东西的选项。
+        """
+        counts: dict[str, int] = {}
+        for manifest in self.all():
+            key = manifest.type.value
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
     def find_similar_apps(self, request_text: str, *, limit: int = 3) -> list[AppMatch]:
         """在已登记的 App 能力里找与需求最接近的（M9「优先复用」）。
 

@@ -146,11 +146,21 @@ class AsyncJobRunner:
                 if job is None or run is None:  # pragma: no cover - 被删除的极端情况
                     return
 
-            def report(event_type: str) -> None:
+            def report(event_type: str, message: str = "") -> None:
                 # 回调在处理器内部同步调用，用独立 Session，避免与处理器的
                 # Session 生命周期纠缠（处理器可能正要提交）。
+                #
+                # `message` 是可选的阶段说明，会展示给用户。调用方必须传
+                # **预先写死**的文案——绝不拼接需求原文、模型输出或异常正文
+                # （与 JobFailure.message 同一条约束）。
                 with self._session_factory() as session:
-                    queue.record_event(session, job_id=job_id, run_id=run_id, event_type=event_type)
+                    queue.record_event(
+                        session,
+                        job_id=job_id,
+                        run_id=run_id,
+                        event_type=event_type,
+                        message=message,
+                    )
 
             with self._session_factory() as session:
                 job = session.get(Job, job_id)

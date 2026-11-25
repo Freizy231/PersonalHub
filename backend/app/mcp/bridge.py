@@ -119,6 +119,9 @@ def _make_definition(
         risk=RiskLevel.WRITE,
         handler=handler,
         display_name=f"{server.name} / {tool.name}",
+        # 影响说明写死在这里：我们不知道外部服务实际会做什么，
+        # 只能如实说"这是一次外部调用"。不能让审批卡片看起来像本地操作。
+        impact="把参数发送给外部 MCP 服务并执行。该服务不受本系统控制，请确认你信任它。",
         # 参数标签无法从 Server 获得（字段名是英文的），
         # 审批摘要会退回"键：值"形式，仍然不是 JSON（D-012）。
         argument_labels=(),

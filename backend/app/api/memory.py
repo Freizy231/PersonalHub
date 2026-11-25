@@ -19,9 +19,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.api.deps import MemoryRepoDep
+from app.api.deps import MemoryRepoDep, SessionDep
 from app.models.memory import MemoryStatus
-from app.schemas.memory import MemoryListOut, MemoryOut, MemoryUpdate
+from app.schemas.memory import MemoryListOut, MemoryOut, MemoryUpdate, SimilarMemoryOut
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -39,18 +39,70 @@ def _require(repo: MemoryRepoDep, memory_id: str):  # type: ignore[no-untyped-de
 @router.get("", response_model=MemoryListOut, summary="列出记忆")
 async def list_memories(
     repo: MemoryRepoDep,
+    session: SessionDep,
     status_filter: Annotated[MemoryStatus | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    q: Annotated[str, Query(max_length=200, description="按内容搜索")] = "",
 ) -> MemoryListOut:
-    items = repo.list(status=status_filter, limit=limit, offset=offset)
+    items = repo.list(status=status_filter, limit=limit, offset=offset, query=q)
+
+    similar = _similar_map(session, items)
     return MemoryListOut(
-        items=[MemoryOut.model_validate(item) for item in items],
-        total=repo.count(status=status_filter),
+        items=[
+            MemoryOut.model_validate(item).model_copy(update={"similar": similar.get(item.id, [])})
+            for item in items
+        ],
+        total=repo.count(status=status_filter, query=q),
         pending_count=repo.count(status=MemoryStatus.PROPOSED),
         limit=limit,
         offset=offset,
+        query=q,
     )
+
+
+def _similar_map(session, items):  # type: ignore[no-untyped-def]
+    """为当前页的每条记忆附上"和它很像的其他条目"（迭代 2 第 4 项）。
+
+    比较范围：**同状态**下的全部记忆（不受搜索词限制）——如果用户的搜索
+    只命中了一条，恰恰更需要知道还有一条几乎一样的没被搜索框过滤掉。
+
+    只对 PROPOSED 计算：提示的目的是"别连续批准重复项"。已批准记忆之间
+    的相似对用户没有可执行动作，显示出来只是噪音。
+
+    这是纯计算，不写库、不改数据、不自动合并——判断权在用户。
+    """
+    from sqlalchemy import select
+
+    from app.models.memory import MemoryItem
+    from app.services.similarity import find_similar
+
+    proposed = [item for item in items if item.status == MemoryStatus.PROPOSED.value]
+    if not proposed:
+        return {}
+
+    workspace_id = proposed[0].workspace_id
+    pool = [
+        (row.id, row.content)
+        for row in session.scalars(
+            select(MemoryItem).where(
+                MemoryItem.workspace_id == workspace_id,
+                MemoryItem.status == MemoryStatus.PROPOSED.value,
+            )
+        )
+    ]
+
+    # 比较池每次查询一次、所有条目共用：避免"每条记忆各查一次库"的 N+1。
+    result: dict[str, list] = {}  # type: ignore[type-arg]
+    for item in proposed:
+        others = [(oid, content) for oid, content in pool if oid != item.id]
+        matches = find_similar(item.content, others)
+        if matches:
+            result[item.id] = [
+                SimilarMemoryOut(id=oid, content=content, score=round(score, 2))
+                for oid, content, score in matches
+            ]
+    return result
 
 
 @router.get("/{memory_id}", response_model=MemoryOut, summary="获取记忆")

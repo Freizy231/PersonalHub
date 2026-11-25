@@ -39,6 +39,7 @@ async def list_messages(
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     order: Annotated[Literal["asc", "desc"], Query()] = "asc",
+    before: Annotated[str | None, Query(max_length=64)] = None,
 ) -> MessageListOut:
     """列出消息。
 
@@ -46,15 +47,29 @@ async def list_messages(
     - asc（默认，向后兼容）：从最早的一条开始，offset 从头部数；
     - desc：从最新的一条开始，offset 从尾部数，但 items 仍按时间正序返回。
 
-    desc 是为会话详情页准备的：长会话只显示最近 200 条，否则最新消息会
-    落在分页之外（实测缺陷）。返回顺序保持正序，调用方无需再反转。
+    **`before` 是"加载更早"的游标**（仅 desc 使用）：给一条消息 id，
+    返回它之前的一页。与 offset 相比，新消息写入不会让游标错位——
+    offset 从尾部数，用户发一条新消息后同一个 offset 就指向别处了。
+
+    `has_more` 表示"沿这个方向继续翻还有没有"。用游标时按锚点之前的总数
+    判断；用 offset 时按已取条数判断。
     """
     _require_conversation(conversations, conversation_id)
+    total = messages.count_for_conversation(conversation_id)
 
-    if order == "desc":
-        items = messages.list_latest(conversation_id, limit=limit, offset=offset)
+    if before:
+        if order != "desc":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+        items = messages.list_before(conversation_id, before, limit=limit)
+        has_more = messages.count_before(conversation_id, before) > len(items)
     else:
-        items = messages.list_for_conversation(conversation_id, limit=limit, offset=offset)
+        if order == "desc":
+            items = messages.list_latest(conversation_id, limit=limit, offset=offset)
+        else:
+            items = messages.list_for_conversation(conversation_id, limit=limit, offset=offset)
+        # 用 len(items) 而不是 limit：最后一页不足一页时也要算对。
+        has_more = offset + len(items) < total
+
     tool_map = messages.tool_invocations_for(conversation_id)
 
     return MessageListOut(
@@ -65,9 +80,10 @@ async def list_messages(
             )
             for item in items
         ],
-        total=messages.count_for_conversation(conversation_id),
+        total=total,
         limit=limit,
         offset=offset,
+        has_more=has_more,
     )
 
 

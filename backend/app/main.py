@@ -27,6 +27,7 @@ from app.api import (
     memory,
     messages,
     plugins,
+    user_tasks,
 )
 from app.api import (
     settings as settings_api,
@@ -149,7 +150,12 @@ def _bootstrap_plugins(app: FastAPI) -> None:
     - 清单不合法 → 永不启用（registry 已保证）；
     - 组合工具的风险 = 所组合工具的最高风险，内部调用仍各自经 Broker 审批。
     """
-    from app.plugins.declarative import manifest_for_plugin_tool, register_plugin_tools
+    from app.plugins.declarative import (
+        manifest_for_plugin_tool,
+        register_plugin_tools,
+        register_process_plugin,
+    )
+    from app.plugins.manifest import PluginType
     from app.plugins.registry import PluginRegistry
 
     settings: Settings = app.state.settings
@@ -166,10 +172,23 @@ def _bootstrap_plugins(app: FastAPI) -> None:
         manifest = installed.manifest
         assert manifest is not None
 
-        # 内部调用所用的 Broker 由请求期的 contextvar 提供（见
-        # plugins/declarative.py 的 set_current_broker），因此这里不需要
-        # 绑定任何审批通道。
-        result = register_plugin_tools(manifest, registry=app.state.tool_registry)
+        # 必须按 manifest.type 分派。实测缺陷（审计 P0-1）：
+        # 原先对所有插件都调用 register_plugin_tools，进程插件重启后
+        # 会被当成声明式注册——没有 composes，于是 risk=READ，
+        # 一个"执行外部代码"的工具以只读身份出现在模型工具清单里，
+        # 不触发审批。执行时虽然会因缺少 handler 失败，但那是偶然兜底，
+        # 不是安全保证。
+        #
+        # 两条路径的 Broker 都由请求期 contextvar 提供
+        # （plugins/declarative.py 的 set_current_broker），这里不绑定通道。
+        if manifest.type is PluginType.PROCESS:
+            result = register_process_plugin(
+                manifest,
+                plugin_dir=registry.root / installed.directory,
+                registry=app.state.tool_registry,
+            )
+        else:
+            result = register_plugin_tools(manifest, registry=app.state.tool_registry)
         registered.extend(result.registered)
         skipped.extend(result.skipped)
 
@@ -359,6 +378,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(memory.router, prefix=settings.api_prefix)
     app.include_router(approvals.router, prefix=settings.api_prefix)
     app.include_router(jobs.router, prefix=settings.api_prefix)
+    app.include_router(user_tasks.router, prefix=settings.api_prefix)
     app.include_router(capabilities.router, prefix=settings.api_prefix)
     app.include_router(mcp.router, prefix=settings.api_prefix)
     app.include_router(plugins.router, prefix=settings.api_prefix)

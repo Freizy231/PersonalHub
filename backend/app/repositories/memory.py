@@ -11,6 +11,20 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.conversation import DEFAULT_WORKSPACE_ID
 from app.models.memory import MemoryItem, MemorySource, MemoryStatus
 
+# 搜索词上限：防止用户粘贴一大段文本变成几十个 LIKE 条件。
+MAX_SEARCH_PARTS = 6
+
+
+def _search_terms(query: str) -> list[str]:
+    """把用户输入拆成用于 LIKE 的片段。
+
+    空白切分即可：中文用户通常整句输入（"学习"），英文用户按词输入。
+    单个片段过长时截断——它只会更匹配不到，不会造成安全问题。
+    空查询返回空列表（不加任何条件）。
+    """
+    parts = [part.strip() for part in (query or "").split() if part.strip()]
+    return [part[:50] for part in parts[:MAX_SEARCH_PARTS]]
+
 
 class MemoryRepository:
     def __init__(self, session: Session) -> None:
@@ -36,27 +50,38 @@ class MemoryRepository:
         workspace_id: str = DEFAULT_WORKSPACE_ID,
         limit: int = 50,
         offset: int = 0,
+        query: str = "",
     ) -> list[MemoryItem]:
         stmt = self._base_query().where(MemoryItem.workspace_id == workspace_id)
-        stmt = stmt.where(MemoryItem.status != MemoryStatus.DELETED.value)
-        if status is not None:
+        if status is None:
+            # 不指定状态时**不包含**已删除：它们是"用户删掉的东西"，
+            # 混进"全部"会让用户以为删除没生效。查看已删除需显式传 DELETED。
+            stmt = stmt.where(MemoryItem.status != MemoryStatus.DELETED.value)
+        else:
             stmt = stmt.where(MemoryItem.status == status.value)
-        stmt = stmt.order_by(MemoryItem.created_at.desc(), MemoryItem.id.desc())
+        for part in _search_terms(query):
+            # 子串匹配：中文没有空格分词，LIKE 比精确词匹配更符合用户预期。
+            stmt = stmt.where(MemoryItem.content.contains(part))
+        stmt = stmt.order_by(MemoryItem.updated_at.desc(), MemoryItem.id.desc())
         return list(self._session.scalars(stmt.limit(limit).offset(offset)))
 
     def count(
-        self, status: MemoryStatus | None = None, workspace_id: str = DEFAULT_WORKSPACE_ID
+        self,
+        status: MemoryStatus | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+        query: str = "",
     ) -> int:
         stmt = (
             select(func.count())
             .select_from(MemoryItem)
-            .where(
-                MemoryItem.workspace_id == workspace_id,
-                MemoryItem.status != MemoryStatus.DELETED.value,
-            )
+            .where(MemoryItem.workspace_id == workspace_id)
         )
-        if status is not None:
+        if status is None:
+            stmt = stmt.where(MemoryItem.status != MemoryStatus.DELETED.value)
+        else:
             stmt = stmt.where(MemoryItem.status == status.value)
+        for part in _search_terms(query):
+            stmt = stmt.where(MemoryItem.content.contains(part))
         return int(self._session.scalar(stmt) or 0)
 
     def approve(self, item: MemoryItem) -> MemoryItem:

@@ -189,8 +189,18 @@ def build_composed_tool(
         risk=risk,
         handler=handler,
         display_name=spec.display_name or spec.name,
+        # 组合工具：如实说明它会**依次**执行哪些内建工具，以及每一步仍需确认。
+        # 用户批准外层不等于批准内层（见模块文档），这句话必须写出来，
+        # 否则用户会以为点一次批准就放行了整条链路。
+        impact=(f"依次调用：{_impact_steps(spec)}。其中每个需要确认的步骤仍会单独询问你。"),
         argument_labels=spec.argument_labels,
     )
+
+
+def _impact_steps(spec: PluginToolSpec) -> str:
+    """把 composes 列表转成可读步骤名（去掉 builtin. 前缀，用顿号连接）。"""
+    names = [item.split(".", 1)[1] if "." in item else item for item in spec.composes]
+    return "、".join(names)
 
 
 def _arguments_for(
@@ -321,6 +331,10 @@ def build_process_tool(
         risk=RiskLevel.WRITE,
         handler=handler,
         display_name=spec.display_name or spec.name,
+        impact=(
+            "在一个隔离沙箱里运行该插件提供的代码（无网络、只读系统目录、"
+            "内存与 CPU 有上限）。它会收到你填写的这些参数。"
+        ),
         argument_labels=spec.argument_labels,
     )
 

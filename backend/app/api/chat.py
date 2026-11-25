@@ -64,6 +64,37 @@ def _sse(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+# 值得原样重发的那句请求的错误码（迭代 2：断线/失败后的重试入口）。
+#
+# 判断依据是"同一请求再发一次，结果是否可能不同"：
+# - 限流、服务不可用、超时、网络不可达、流中断 —— 过一会儿可能就好了；
+# - 未配置 Key、地址不对、鉴权失败 —— 重发一百次也一样，要让用户去改配置；
+# - 模型返回空内容、内部错误 —— 不确定，按可重试处理（代价只是一次重发）。
+#
+# 这个分类同时驱**界面**与**重试按钮**：不可重试时界面直接说"请检查配置"，
+# 而不是给一个点了必然失败的重试按钮。
+RETRYABLE_ERROR_CODES = frozenset(
+    {
+        "PROVIDER_TIMEOUT",
+        "PROVIDER_UNREACHABLE",
+        "PROVIDER_RATE_LIMIT",
+        "PROVIDER_UNAVAILABLE",
+        "STREAM_INTERRUPTED",
+        "EMPTY_RESPONSE",
+        "INTERNAL_ERROR",
+    }
+)
+
+
+def is_retryable(code: str | None) -> bool:
+    return bool(code) and code in RETRYABLE_ERROR_CODES
+
+
+def _error_event(code: str, message: str) -> str:
+    """统一的错误事件：带上"是否可以原样重试"。"""
+    return _sse("error", {"code": code, "message": message, "retryable": is_retryable(code)})
+
+
 def build_provider(settings: Settings) -> OpenAICompatibleProvider:
     """按配置构造供应商。
 
@@ -271,6 +302,9 @@ async def stream_chat(
                 "approval_id": req.approval_id,
                 "tool": req.tool_name,
                 "title": req.title or req.tool_name,
+                # 会发生什么（工具声明的一句话）。空字符串表示工具没有声明，
+                # 界面此时不显示影响区块，也不替它编一句。
+                "impact": req.impact,
                 # 摘要已是「标签 + 值」的纯文本，不是 JSON（D-012）。
                 "summary": [{"label": label, "value": value} for label, value in req.summary],
                 "preview": req.preview,
@@ -292,10 +326,15 @@ async def stream_chat(
         provider = build_provider(settings)
     except ProviderConfigurationError as exc:
         # 配置缺失是用户能自行修复的问题，文案由本模块预先写死，安全可外露。
+        #
+        # `retryable=False` 是**必要**的表态：这个接口返回 503，而前端把
+        # "503 且没有结构化错误体"当作后端未启动（可重试）。不显式说明的话，
+        # 一个"没配 Key"的错误会显示成"重试"按钮——点多少次都是同样失败。
         raise PublicMessageError(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             code="PROVIDER_NOT_CONFIGURED",
             message=provider_config_hint(settings, str(exc)),
+            retryable=False,
         ) from exc
 
     # 1) 先保存用户消息。即使用户随后取消，他的提问也不该丢。
@@ -454,7 +493,10 @@ async def stream_chat(
                     elif event.kind == "error":
                         outcome, error_code = "failed", str(event.payload.get("code", "ERROR"))
                         loop_task.cancel()
-                        yield _sse("error", event.payload)
+                        yield _error_event(
+                            str(event.payload.get("code", "ERROR")),
+                            str(event.payload.get("message", "处理过程中出现内部错误。")),
+                        )
                         return
                     # done 事件不携带全文，文本已通过 delta 累加，无需再处理。
             finally:
@@ -468,7 +510,7 @@ async def stream_chat(
             reply = "".join(collected).strip()
             if not reply:
                 outcome, error_code = "failed", "EMPTY_RESPONSE"
-                yield _sse("error", {"code": "EMPTY_RESPONSE", "message": "模型没有返回内容。"})
+                yield _error_event("EMPTY_RESPONSE", "模型没有返回内容。")
                 return
 
             # 助手消息入库。role 由服务端写入，前端无法伪造（§8.4）。
@@ -485,11 +527,11 @@ async def stream_chat(
             yield _sse("done", {"message_id": stored.id})
         except ProviderError as exc:
             outcome, error_code = "failed", exc.code
-            yield _sse("error", {"code": exc.code, "message": str(exc)})
+            yield _error_event(exc.code, str(exc))
         except Exception:
             logger.exception("模型流式调用异常", extra={"conversation_id": payload.conversation_id})
             outcome, error_code = "failed", "INTERNAL_ERROR"
-            yield _sse("error", {"code": "INTERNAL_ERROR", "message": "生成失败，请稍后重试。"})
+            yield _error_event("INTERNAL_ERROR", "生成失败，请稍后重试。")
         finally:
             # 客户端断开（用户点"停止生成"/关页面）时，`yield` 会抛
             # GeneratorExit（或 CancelledError），走到这里。必须：

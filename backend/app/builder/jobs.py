@@ -41,6 +41,11 @@ logger = logging.getLogger(__name__)
 
 GENERATE_APP_JOB = "generate_app"
 
+# 阶段事件文本。界面据此显示"进行到哪一步"，而不是笼统的"正在生成"。
+# 刻意是常量而不是自由文本：它们会落库并展示，任何拼接都可能带进用户内容。
+PROGRESS_GENERATING = "正在生成页面"
+PROGRESS_CHECKED = "已通过安全检查"
+
 # 自动重试有上限：模型限流时连续重试 3 次足够，再多是在打扰供应商。
 MAX_ATTEMPTS = 3
 
@@ -96,7 +101,9 @@ class GenerateAppJob:
         except RequirementError as exc:
             raise JobFailure(str(exc), code=exc.code) from exc
 
-        report("progress")
+        # 阶段事件只带**预先写死**的文案，不含需求原文、模型输出或文件路径：
+        # 它们会写进数据库并在活动/应用页展示（§7.4「用户可理解的执行摘要」）。
+        report("progress", PROGRESS_GENERATING)
 
         egress = EgressRecord(
             provider=provider.name,
@@ -147,6 +154,8 @@ class GenerateAppJob:
                 code="APP_WRITE_FAILED",
                 retryable=True,
             ) from exc
+
+        report("progress", PROGRESS_CHECKED)
 
         logger.info(
             "应用已生成到 staging",
