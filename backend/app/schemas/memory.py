@@ -26,6 +26,17 @@ class MemorySourceOut(BaseModel):
     excerpt: str
 
 
+class SimilarMemoryOut(BaseModel):
+    """一条"和当前记忆很像"的其他候选（迭代 2 第 4 项）。
+
+    只用于提示，不参与任何自动合并或自动批准——判断权在用户。
+    """
+
+    id: str
+    content: str
+    score: float
+
+
 class MemoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -38,6 +49,8 @@ class MemoryOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     sources: list[MemorySourceOut] = []
+    # 近似候选。仅 PROPOSED 计算，其余状态恒为空列表。
+    similar: list[SimilarMemoryOut] = []
 
     @field_validator("created_at", "updated_at", mode="before")
     @classmethod
@@ -58,6 +71,8 @@ class MemoryListOut(BaseModel):
     offset: int
     # 待审核数量，便于首页/导航显示角标，避免用户漏看。
     pending_count: int
+    # 本次请求实际生效的搜索词（原样回显，便于界面显示"正在搜索：…"）。
+    query: str = ""
 
 
 class MemoryUpdate(BaseModel):

@@ -100,6 +100,98 @@ class TestFingerprint:
         assert arguments_fingerprint("t", args) == arguments_fingerprint("t", dict(args))
 
 
+class TestApprovalPreview:
+    """审批摘要必须给人看，不能是 JSON（D-012）。"""
+
+    def test_preview_is_human_readable_not_json(self) -> None:
+        from app.capabilities.tools import build_create_task
+
+        definition = build_create_task(session_factory=None)  # type: ignore[arg-type]
+        preview = am.build_preview(
+            "create_task",
+            {"title": "学习 Python", "description": "先掌握基础语法"},
+            definition=definition,
+        )
+
+        assert preview == "标题：学习 Python\n说明：先掌握基础语法"
+        # 关键断言：不能出现 JSON 的括号、冒号键值结构与引号。
+        for machine_token in ('{"', '":', "{\n", "}\n"):
+            assert machine_token not in preview
+
+    def test_preview_uses_chinese_labels(self) -> None:
+        from app.capabilities.tools import build_create_task
+
+        definition = build_create_task(session_factory=None)  # type: ignore[arg-type]
+        preview = am.build_preview("create_task", {"title": "标题值"}, definition=definition)
+
+        assert "title" not in preview
+        assert preview.startswith("标题：")
+
+    def test_preview_without_definition_falls_back_to_plain_lines(self) -> None:
+        """没有工具定义时也不能输出 JSON。"""
+        preview = am.build_preview("mystery_tool", {"alpha": "a", "beta": 2})
+
+        assert preview == "alpha：a\nbeta：2"
+        assert "{" not in preview and '"' not in preview
+
+    def test_preview_handles_empty_arguments(self) -> None:
+        assert am.build_preview("mystery_tool", {}) == "mystery_tool（无参数）"
+
+    def test_preview_truncates_on_line_boundary(self) -> None:
+        """截断不能切在句子中间，也不能留下半截 JSON。"""
+        args = {"title": "标题", "description": "长" * 1000}
+
+        preview = am.build_preview("create_task", args)
+
+        assert preview.endswith("…")
+        assert len(preview) <= am.MAX_PREVIEW + 2
+        # 每一行都必须是完整的「标签：值」。
+        for line in preview.splitlines()[:-1]:
+            assert "：" in line
+
+    def test_list_values_are_joined_not_json(self) -> None:
+        preview = am.build_preview("mystery_tool", {"tags": ["甲", "乙"]})
+
+        assert preview == "tags：甲、乙"
+
+    def test_summary_struct_passed_to_resolver(self, session) -> None:
+        """Broker 必须把结构化摘要交给 resolver，前端才能渲染中文标签。"""
+        import asyncio
+
+        from sqlalchemy.orm import sessionmaker
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="create_task",
+                description="测试",
+                parameters={"type": "object", "properties": {"title": {"type": "string"}}},
+                risk=RiskLevel.WRITE,
+                handler=lambda args, ctx: {"ok": True},
+                display_name="创建任务",
+                argument_labels=(("title", "标题"),),
+            )
+        )
+        captured: list[object] = []
+
+        async def resolver(request):  # type: ignore[no-untyped-def]
+            captured.append(request)
+            return False
+
+        broker = ToolBroker(
+            registry,
+            session_factory=sessionmaker(bind=session.get_bind()),
+            approval_resolver=resolver,
+        )
+
+        asyncio.run(broker.execute("create_task", '{"title":"学 Python"}', CTX))
+
+        request = captured[0]
+        assert request.title == "创建任务"  # type: ignore[attr-defined]
+        assert request.summary == (("标题", "学 Python"),)  # type: ignore[attr-defined]
+        assert request.arguments == {"title": "学 Python"}  # type: ignore[attr-defined]
+
+
 class TestApprovalLifecycle:
     def _pending(self, session, **kwargs):  # type: ignore[no-untyped-def]
         defaults = dict(

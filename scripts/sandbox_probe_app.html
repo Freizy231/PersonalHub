@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>沙箱探针</title>
+<style>body{font-family:system-ui;padding:16px;background:#fff;color:#111}
+li{margin:4px 0}</style></head>
+<body>
+<h1>沙箱探针</h1>
+<ul id="out"></ul>
+<script>
+const out = document.getElementById("out");
+function add(label, fn) {
+  let text;
+  try { text = fn(); } catch (e) { text = "抛出 " + e.name + ": " + e.message; }
+  const li = document.createElement("li");
+  li.textContent = label + " → " + text;
+  out.appendChild(li);
+}
+add("读父页面标题", () => window.parent.document.title.slice(0, 20));
+add("读 localStorage", () => String(window.localStorage.getItem("x")));
+add("读 cookie", () => String(document.cookie));
+add("origin", () => String(window.origin));
+add("脚本已执行", () => "是（说明 allow-scripts 生效）");
+fetch("http://example.com/secret").then(
+  () => add("fetch 外部地址", () => "成功——这是缺陷"),
+  (e) => add("fetch 外部地址", () => "被拦：" + e.name)
+);
+</script>
+</body>
+</html>

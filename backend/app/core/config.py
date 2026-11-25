@@ -103,6 +103,42 @@ class Settings:
     def db_path(self) -> Path:
         return self.data_dir / "db" / "personal-hub.db"
 
+    @property
+    def skills_dir(self) -> Path:
+        """用户技能目录（AGENT.md §5.3 数据目录约定）。
+
+        每个技能一个子目录，里面放 SKILL.md。目录不存在时视为"没有技能"，
+        不会自动创建——避免在用户不知情时往数据目录里塞东西。
+        """
+        return self.data_dir / "skills"
+
+    @property
+    def plugins_dir(self) -> Path:
+        """插件目录（M8 第 6–7 项）。
+
+        每个插件一个子目录；卸载时目录被重命名为 `.<id>.uninstalled`
+        而**不删除**，保留用户可能的配置。
+        """
+        return self.data_dir / "plugins"
+
+    @property
+    def builder_dir(self) -> Path:
+        """生成的 Personal App（M9）。
+
+        AppStore 在此目录下建立 `apps/`（已安装）与 `staging/`（生成中）。
+        只暴露一个根路径，避免两处各自拼路径产生不一致。
+        """
+        return self.data_dir / "builder"
+
+    @property
+    def mcp_dir(self) -> Path:
+        """MCP 配置与子进程工作目录（M8 第 4 项）。
+
+        配置文件为 `servers.json`；每个 Server 获得一个同名子目录作为
+        工作目录，子进程的默认工作路径因此不会落在主目录或源码仓库里。
+        """
+        return self.data_dir / "mcp"
+
     @classmethod
     def from_env(cls) -> Settings:
         return cls(

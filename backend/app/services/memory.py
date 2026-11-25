@@ -16,7 +16,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai import ChatMessage
@@ -208,3 +208,40 @@ def approved_memories(session: Session, workspace_id: str) -> list[MemoryItem]:
             )
         )
     )
+
+
+def approved_memory_candidates(session: Session, workspace_id: str) -> list:  # type: ignore[no-untyped-def]
+    """已批准记忆的**纯数据**视图，供 Context Engine 排序（§4.5）。
+
+    为什么在这里转成 MemoryCandidate 而不是在 context.py 里读数据库：
+    Context Engine 保持纯函数（无 IO、可穷举测试），
+    "从哪张表、哪些状态里取"是本模块的职责。
+
+    仍然只取 APPROVED——这条约束在 SQL 层强制，不依赖调用方记得检查。
+    顺带统计来源条数（§4.4 要求记忆必须有 provenance，上下文里也标出来）。
+    """
+    from app.models.memory import MemorySource
+    from app.services.context import MemoryCandidate
+
+    rows = session.execute(
+        select(MemoryItem, func.count(MemorySource.id))
+        .outerjoin(MemorySource, MemorySource.memory_id == MemoryItem.id)
+        .where(
+            MemoryItem.workspace_id == workspace_id,
+            MemoryItem.status == MemoryStatus.APPROVED.value,
+        )
+        .group_by(MemoryItem.id)
+    ).all()
+
+    return [
+        MemoryCandidate(
+            id=item.id,
+            content=item.content,
+            kind=item.kind,
+            sensitivity=item.sensitivity,
+            confidence=item.confidence,
+            updated_at=item.updated_at,
+            source_count=int(count or 0),
+        )
+        for item, count in rows
+    ]

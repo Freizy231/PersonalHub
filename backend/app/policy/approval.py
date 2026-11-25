@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -62,20 +61,52 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def build_preview(tool_name: str, arguments: dict[str, Any]) -> str:
+def build_preview(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    definition=None,  # type: ignore[no-untyped-def]
+) -> str:
     """生成给用户看的参数摘要。
+
+    输出是**自然语言式的行文本**，不是 JSON（D-012）：
+        标题：学习 Python
+        说明：先掌握基础语法…
+
+    为什么不再输出 `create_task {"title": "..."}`：审批卡片是给人看的，
+    括号、引号和转义字符只会增加阅读负担；长描述被截断时还会切在 JSON
+    中间，变成半截乱码。
 
     只展示参数内容本身（用户需要看清"要做什么"），
     不写入日志（§7.4：日志不记录完整敏感内容）。
     """
-    try:
-        text = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
-    except (TypeError, ValueError):
-        text = "<无法序列化的参数>"
-    preview = f"{tool_name} {text}"
-    if len(preview) > MAX_PREVIEW:
-        preview = preview[:MAX_PREVIEW] + "…"
-    return preview
+    if definition is not None:
+        pairs = definition.summarize_arguments(arguments)
+        title = definition.title
+    else:
+        # 没有工具定义时（例如直接调用本函数的测试/迁移脚本）退回可读的兜底：
+        # 逐行 `键：值`，仍然不输出 JSON 结构。
+        from app.capabilities import humanize_value
+
+        pairs = [(key, humanize_value(value)) for key, value in arguments.items()]
+        title = tool_name
+
+    if not pairs:
+        return f"{title}（无参数）"
+
+    lines = [f"{label}：{value}" for label, value in pairs if value]
+    text = "\n".join(lines) if lines else f"{title}（无参数）"
+    if len(text) > MAX_PREVIEW:
+        # 按行截断：宁可少显示最后一整行，也不切断句子。
+        kept: list[str] = []
+        used = 0
+        for line in lines:
+            if used + len(line) + 1 > MAX_PREVIEW - 1:
+                break
+            kept.append(line)
+            used += len(line) + 1
+        text = "\n".join(kept) + "\n…"
+    return text
 
 
 def create_pending(
@@ -87,12 +118,16 @@ def create_pending(
     workspace_id: str,
     conversation_id: str | None,
     ttl: timedelta = DEFAULT_TTL,
+    definition=None,  # type: ignore[no-untyped-def]
 ) -> Approval:
-    """创建待审批记录，状态 PENDING。"""
+    """创建待审批记录，状态 PENDING。
+
+    definition 是工具定义；提供时会用它生成人类可读摘要与中文工具名。
+    """
     approval = Approval(
         tool_name=tool_name,
         arguments_fingerprint=arguments_fingerprint(tool_name, arguments),
-        arguments_preview=build_preview(tool_name, arguments),
+        arguments_preview=build_preview(tool_name, arguments, definition=definition),
         status=ApprovalStatus.PENDING.value,
         principal_id=principal_id,
         workspace_id=workspace_id,
@@ -202,6 +237,41 @@ def expire_stale(session: Session) -> int:
     if stale:
         session.commit()
     return len(stale)
+
+
+def cancel_pending_by_ids(
+    session: Session, approval_ids: list[str], *, source: str = "cancelled"
+) -> int:
+    """按 id 作废仍在等待的审批，返回处理条数。
+
+    场景：用户在对话中点"停止生成"或直接关掉页面，SSE 连接断开。
+    若不清理，这些审批会一直停在 PENDING，直到超时（10 分钟）才变成 EXPIRED，
+    界面上表现为"待审批事项里躺着一个早已没人等的请求"。
+
+    用 DENIED 而不是新增状态：审批被取消在语义上就是"未被批准、不会执行"。
+    新增状态值需要数据库迁移，收益不足以支撑（见 D-012）。
+    decision_source 记录真实原因（cancelled = 对话被中断），保留可追溯性。
+
+    按 id 而非按会话：同一会话里可能有两轮生成同时在等审批，
+    结束其中一轮不该把另一轮的请求也作废。
+    """
+    if not approval_ids:
+        return 0
+    stmt = select(Approval).where(
+        Approval.id.in_(approval_ids),
+        Approval.status == ApprovalStatus.PENDING.value,
+    )
+    return _cancel(session, list(session.scalars(stmt)), source)
+
+
+def _cancel(session: Session, pending: list[Approval], source: str) -> int:
+    for approval in pending:
+        approval.status = ApprovalStatus.DENIED.value
+        approval.decision_source = source
+        approval.decided_at = _now()
+    if pending:
+        session.commit()
+    return len(pending)
 
 
 def get_for_principal(session: Session, approval_id: str, principal_id: str) -> Approval | None:

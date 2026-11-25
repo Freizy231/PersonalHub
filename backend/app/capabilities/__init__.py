@@ -12,6 +12,7 @@ Schema 只用于校验输入形态，是否允许调用由 M6 的 Policy Engine 
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -40,6 +41,10 @@ class ToolContext:
 
     workspace_id: str
     conversation_id: str
+    # 本次调用所依据的审批记录 id。仅当调用确实经过用户审批时由 Broker 填入，
+    # 用于把写入的数据追溯到"哪一次确认"（§5.2 任务必须可追踪）。
+    # 默认 None：只读调用或非审批路径不会带它。
+    approval_id: str | None = None
 
 
 class ToolHandler(Protocol):
@@ -47,9 +52,24 @@ class ToolHandler(Protocol):
 
     实现必须是同步的纯业务函数：不直接访问网络、不接受任意路径、
     不执行 Shell。任何副作用型能力都要在 M6 之后单独评审。
+
+    M8 起，外部能力（MCP）通过 `AsyncToolHandler` 接入，二者由 Broker
+    分别处理；本协议保持不变，避免所有内建工具被迫改成 async。
     """
 
     def __call__(self, arguments: dict[str, Any], context: ToolContext) -> Any: ...
+
+
+class AsyncToolHandler(Protocol):
+    """异步工具实现协议（M8，供 MCP 等需要 IO 的外部能力使用）。
+
+    为什么单独定义而不是把同步协议改成 async：MCP 调用必须 await
+    （它在等外部进程/网络），而内建工具全是纯同步逻辑。让两者并存，
+    内建工具保持简单可测，外部能力也有正确的位置。
+    Broker 负责区分：同步 handler 直接调用，异步 handler 用 await。
+    """
+
+    def __call__(self, arguments: dict[str, Any], context: ToolContext) -> Awaitable[Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,9 +79,78 @@ class ToolDefinition:
     parameters: dict[str, object]
     risk: RiskLevel
     handler: ToolHandler = field(repr=False)
+    # 给用户看的工具名（"创建任务"）。审批卡片用它，而不是内部标识 create_task。
+    display_name: str = ""
+    # 这次调用**会发生什么**，一句话，面向普通用户。
+    #
+    # 为什么由工具自己声明：只有工具知道自己的真实副作用（创建一条任务 /
+    # 写一个应用新版本 / 在沙箱里执行外部代码）。放在前端映射表里，
+    # 新增工具时必然漏写，而漏写的后果是用户在不知道自己批准了什么的情况下点了批准。
+    # 与 display_name 一样，它是**说明**，不参与任何权限判断。
+    impact: str = ""
+    # 参数名 -> 中文标签。审批摘要据此输出"标题：…"，而不是 JSON 键值对。
+    argument_labels: tuple[tuple[str, str], ...] = ()
+    # 自定义审批摘要（可选）。参数本身不可读时用它，例如一个工具的参数是
+    # 整段 HTML——把前 200 个字符塞进审批卡片，用户看到的是一堆标签。
+    # 默认 None：沿用"标签：值"的通用规则（D-012）。
+    argument_summarizer: Callable[[dict[str, Any]], list[tuple[str, str]]] | None = None
+    # 本工具结果回填给模型的上限（字符）。默认沿用 Broker 的统一上限；
+    # 需要把完整内容交给模型的工具（如读取应用源码）单独放宽。
+    max_result_chars: int | None = None
 
     def to_spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
+
+    @property
+    def title(self) -> str:
+        """面向用户的名称。没声明时退回内部名称（仍然不是 JSON）。"""
+        return self.display_name or self.name
+
+    def summarize_arguments(self, arguments: dict[str, Any]) -> list[tuple[str, str]]:
+        """把参数翻译成「标签 + 值」列表，供审批界面展示。
+
+        刻意不输出 JSON 结构：审批是给人看的，`{"title": "..."}` 只会让用户
+        去解析括号和引号（见 docs/DECISIONS.md D-012）。
+        未知参数用原始键名兜底，保证将来新增工具时不会退化成 JSON。
+        """
+        if self.argument_summarizer is not None:
+            return list(self.argument_summarizer(arguments))
+        labels = dict(self.argument_labels)
+        summary: list[tuple[str, str]] = []
+        for key, value in arguments.items():
+            text = humanize_value(value)
+            if text:
+                summary.append((labels.get(key, key), text))
+        return summary
+
+
+def humanize_value(value: Any, *, limit: int = 200) -> str:
+    """把任意参数值转成可读的一行文本。
+
+    - 列表用顿号连接（"a、b、c"），而不是 `["a","b"]`。
+    - 布尔显示为是/否，None 省略。
+    - 过长的文本截断并加省略号，避免一条描述挤满整张卡片。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        text = "是" if value else "否"
+    elif isinstance(value, str):
+        text = value.strip()
+    elif isinstance(value, (list, tuple)):
+        parts = [humanize_value(item, limit=limit) for item in value]
+        text = "、".join(part for part in parts if part)
+    elif isinstance(value, dict):
+        pairs = [
+            f"{key}={humanize_value(item, limit=limit)}" for key, item in value.items() if item
+        ]
+        text = "；".join(pairs)
+    else:
+        text = str(value)
+
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return text
 
 
 class ToolRegistry:
@@ -77,6 +166,14 @@ class ToolRegistry:
 
     def get(self, name: str) -> ToolDefinition | None:
         return self._tools.get(name)
+
+    def remove(self, name: str) -> bool:
+        """移除一个已注册工具（M8：禁用插件时使用）。返回是否真的移除了。
+
+        Registry 只负责登记，这里不判断调用方是否有权移除；
+        权限由 API 层控制的插件状态决定。
+        """
+        return self._tools.pop(name, None) is not None
 
     def all(self) -> list[ToolDefinition]:
         return list(self._tools.values())

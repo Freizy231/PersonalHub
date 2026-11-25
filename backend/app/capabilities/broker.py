@@ -17,11 +17,13 @@ M6 完整检查链（§4.10 步骤 1–10）：
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from dataclasses import replace as dataclasses_replace
 from typing import Any
 
 from app.capabilities import (
@@ -58,12 +60,25 @@ class ToolResult:
 
 @dataclass(frozen=True, slots=True)
 class ApprovalRequest:
-    """需要用户确认时，交给调用方的信息（用于 SSE 展示）。"""
+    """需要用户确认时，交给调用方的信息（用于 SSE 展示）。
+
+    同时给出多种粒度，界面按需选用（D-012）：
+    - title / summary / impact：给人看的自然语言；
+    - preview：多行摘要文本（兼容只显示文本的旧界面）；
+    - arguments：原始参数，供"查看原始参数"折叠区核对。
+
+    `impact` 说明"这次调用会发生什么"。它由工具自己声明（`ToolDefinition.impact`），
+    不参与任何权限判断——审批的绑定语义仍由票据指纹保证。
+    """
 
     approval_id: str
     tool_name: str
     preview: str
     expires_in_seconds: int
+    title: str = ""
+    summary: tuple[tuple[str, str], ...] = ()
+    arguments: dict[str, Any] = field(default_factory=dict)
+    impact: str = ""
 
 
 # 调用方提供：给定审批信息，等待用户决定，返回是否批准。
@@ -88,6 +103,10 @@ class ToolBroker:
         self._session_factory = session_factory
         self._approval_resolver = approval_resolver
         self._session_grants = session_grants
+
+    def definition_of(self, name: str) -> ToolDefinition | None:
+        """按名字取工具定义（用于展示中文名等元数据，不授予任何执行能力）。"""
+        return self._registry.get(name)
 
     async def execute(
         self,
@@ -143,7 +162,7 @@ class ToolBroker:
                 definition, name, call_id, arguments, context, principal_id
             )
 
-        return self._run(definition, name, call_id, arguments, context)
+        return await self._run(definition, name, call_id, arguments, context)
 
     async def _execute_with_approval(
         self,
@@ -178,6 +197,7 @@ class ToolBroker:
                 principal_id=principal_id,
                 workspace_id=context.workspace_id,
                 conversation_id=context.conversation_id,
+                definition=definition,
             )
             approval_id = approval.id
             preview = approval.arguments_preview
@@ -188,6 +208,10 @@ class ToolBroker:
                 tool_name=name,
                 preview=preview,
                 expires_in_seconds=int(DEFAULT_TTL.total_seconds()),
+                title=definition.title,
+                summary=tuple(definition.summarize_arguments(arguments)),
+                arguments=arguments,
+                impact=definition.impact,
             )
         )
 
@@ -214,9 +238,13 @@ class ToolBroker:
                 )
                 return self._result(name, call_id, "denied", exc.code, str(exc))
 
-        return self._run(definition, name, call_id, arguments, context)
+        # 票据已消费：这次执行确实经过用户确认。把审批 id 交给工具，
+        # 让写入的数据能追溯到"哪一次确认"（§5.2）。用一个新上下文而不是
+        # 直接改写传入对象——ToolContext 是 frozen，且调用方可能复用同一实例。
+        approved_context = dataclasses_replace(context, approval_id=approval_id)
+        return await self._run(definition, name, call_id, arguments, approved_context)
 
-    def _run(
+    async def _run(
         self,
         definition: ToolDefinition,
         name: str,
@@ -224,9 +252,16 @@ class ToolBroker:
         arguments: dict[str, Any],
         context: ToolContext,
     ) -> ToolResult:
+        """执行工具。同步 handler 直接调用，异步 handler（MCP）await。
+
+        为什么在这里区分：Broker 是唯一执行入口（§4.10），
+        外部能力的执行也必须经这唯一入口，而不是另开一条绕过校验的路径。
+        """
         started = time.monotonic()
         try:
             output = definition.handler(arguments, context)
+            if inspect.isawaitable(output):
+                output = await output
         except ToolExecutionError as exc:
             return self._result(name, call_id, "error", "TOOL_ERROR", str(exc))
         except Exception:
@@ -243,7 +278,13 @@ class ToolBroker:
                 },
             )
 
-        return self._result(name, call_id, "ok", None, _encode_output(output))
+        return self._result(
+            name,
+            call_id,
+            "ok",
+            None,
+            _encode_output(output, limit=definition.max_result_chars or MAX_RESULT_CHARS),
+        )
 
     def _result(
         self, name: str, call_id: str, status: str, code: str | None, content: str
@@ -251,23 +292,27 @@ class ToolBroker:
         return ToolResult(call_id, name, status, content, error_code=code)
 
 
-def _encode_output(output: Any) -> str:
+def _encode_output(output: Any, *, limit: int = MAX_RESULT_CHARS) -> str:
     """把工具输出编码为字符串，并施加大小上限。
 
     必须是 JSON：模型更容易正确解读结构化结果，也便于我们断言其形态。
+
+    `limit` 由工具声明：绝大多数工具用统一上限，防止"通过工具塞入大量内容"
+    （§8.4）；`read_app` 这类**必须把完整内容交给模型**的工具单独放宽，
+    否则模型只能看到被截断的源码，改出来的东西一定是错的。
     """
     try:
         text = json.dumps(output, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         return json.dumps({"error": "工具返回了无法序列化的结果"}, ensure_ascii=False)
 
-    if len(text) > MAX_RESULT_CHARS:
+    if len(text) > limit:
         # 截断时保持 JSON 合法，避免模型收到半截结构而解析失败。
         return json.dumps(
             {
                 "truncated": True,
-                "note": f"结果超过 {MAX_RESULT_CHARS} 字符已截断",
-                "preview": text[:MAX_RESULT_CHARS],
+                "note": f"结果超过 {limit} 字符已截断",
+                "preview": text[:limit],
             },
             ensure_ascii=False,
         )

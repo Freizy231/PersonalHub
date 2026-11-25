@@ -10,17 +10,31 @@ import { getSessionToken } from './session'
 export interface StreamHandlers {
   onDelta: (text: string) => void
   /** 工具调用的开始与结束。让用户看得见 AI 在做什么（AGENT.md §7.4 可理解摘要）。 */
-  onToolStart?: (payload: { id: string; name: string }) => void
+  onToolStart?: (payload: { id: string; name: string; display_name?: string }) => void
   onToolEnd?: (payload: { id: string; name: string; status: string; error_code?: string }) => void
+  /** 后端已受理这条消息（用户消息已入库）。此后取消失败也不该把原文还给输入框。 */
+  onAccepted?: () => void
   /** 需要用户审批。收到后对话会暂停，直到调用 approvals.decide。 */
   onApprovalRequired?: (payload: {
     approval_id: string
     tool: string
+    title?: string
+    impact?: string
+    summary?: { label: string; value: string }[]
+    arguments?: Record<string, unknown>
     preview: string
     expires_in: number
   }) => void
   onDone: (payload: { message_id: string }) => void
-  onError: (payload: { code: string; message: string }) => void
+  /**
+   * 出错。
+   *
+   * `retryable` 由**服务端**给出（`app/api/chat.py::RETRYABLE_ERROR_CODES`）：
+   * 同一个请求原样再发一次，是否可能成功。
+   * 前端刻意不维护第二份分类表——两份表迟早会漂移，而漂移的后果是
+   * 用户点一个"重试"却永远失败，或者明明能重试却没有入口。
+   */
+  onError: (payload: { code: string; message: string; retryable?: boolean }) => void
 }
 
 /** 单条 SSE 帧解析结果。 */
@@ -70,7 +84,11 @@ export async function streamChat(
     })
   } catch {
     if (signal.aborted) return
-    handlers.onError({ code: 'NETWORK_ERROR', message: '无法连接到本地后端服务。' })
+    handlers.onError({
+      code: 'NETWORK_ERROR',
+      message: '无法连接到本地后端服务。',
+      retryable: true,
+    })
     return
   }
 
@@ -79,12 +97,26 @@ export async function streamChat(
     try {
       const body = await response.json()
       const message = body?.error?.message ?? '请求失败。'
-      handlers.onError({ code: body?.error?.code ?? `HTTP_${response.status}`, message })
+      handlers.onError({
+        code: body?.error?.code ?? `HTTP_${response.status}`,
+        message,
+        retryable: Boolean(body?.error?.retryable),
+      })
     } catch {
-      handlers.onError({ code: `HTTP_${response.status}`, message: '请求失败。' })
+      // 拿不到结构化错误体：502/503/504 通常是后端还没起来，值得重试；
+      // 其它状态码按不可重试处理，避免给出一个点了必然失败的按钮。
+      handlers.onError({
+        code: `HTTP_${response.status}`,
+        message: '请求失败。',
+        retryable: [502, 503, 504].includes(response.status),
+      })
     }
     return
   }
+
+  // 走到这里说明后端返回 200：它在开始流式响应**之前**已经把用户消息入库。
+  // 从这里往后再取消，原文就不该还回输入框（否则会重发出重复消息）。
+  handlers.onAccepted?.()
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -111,10 +143,19 @@ export async function streamChat(
           if (typeof text === 'string') handlers.onDelta(text)
         } else if (frame.event === 'approval_required') {
           handlers.onApprovalRequired?.(
-            payload as { approval_id: string; tool: string; preview: string; expires_in: number },
+            payload as {
+              approval_id: string
+              tool: string
+              title?: string
+              impact?: string
+              summary?: { label: string; value: string }[]
+              arguments?: Record<string, unknown>
+              preview: string
+              expires_in: number
+            },
           )
         } else if (frame.event === 'tool_start') {
-          handlers.onToolStart?.(payload as { id: string; name: string })
+          handlers.onToolStart?.(payload as { id: string; name: string; display_name?: string })
         } else if (frame.event === 'tool_end') {
           handlers.onToolEnd?.(
             payload as { id: string; name: string; status: string; error_code?: string },
@@ -122,14 +163,18 @@ export async function streamChat(
         } else if (frame.event === 'done') {
           handlers.onDone(payload as { message_id: string })
         } else if (frame.event === 'error') {
-          handlers.onError(payload as { code: string; message: string })
+          handlers.onError(payload as { code: string; message: string; retryable?: boolean })
         }
       }
     }
   } catch {
     // 用户主动取消不算错误；其余中断提示网络问题。
     if (!signal.aborted) {
-      handlers.onError({ code: 'STREAM_INTERRUPTED', message: '连接中断，回复可能不完整。' })
+      handlers.onError({
+        code: 'STREAM_INTERRUPTED',
+        message: '连接中断，回复可能不完整。',
+        retryable: true,
+      })
     }
   } finally {
     reader.releaseLock()

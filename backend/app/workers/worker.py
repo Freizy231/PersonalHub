@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models.job import Job
 from app.models.task_run import TaskRun
 from app.workers import queue
+from app.workers.async_runner import AsyncJobHandler, AsyncJobRunner
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +92,15 @@ class Worker:
         *,
         poll_interval: float = POLL_INTERVAL_SECONDS,
         run_timeout: timedelta = RUN_TIMEOUT,
+        async_handlers: dict[str, AsyncJobHandler] | None = None,
+        async_runner: AsyncJobRunner | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._registry = registry
+        # 异步作业（M9 生成）：需要等待模型流的类型交给 AsyncJobRunner，
+        # 不占住轮询循环。没有异步处理器时行为与 M7 完全一致。
+        self._async_handlers = async_handlers or {}
+        self._async_runner = async_runner
         self._poll_interval = poll_interval
         self._run_timeout = run_timeout
         self._task: asyncio.Task[None] | None = None
@@ -113,6 +120,9 @@ class Worker:
         logger.info("后台 Worker 已启动")
 
     async def stop(self) -> None:
+        # 先停异步任务：它们可能正在等模型流，先取消能尽快释放。
+        if self._async_runner is not None:
+            await self._async_runner.stop()
         if self._task is None:
             return
         self._stop.set()
@@ -164,6 +174,13 @@ class Worker:
             run = queue.start_run(session, job)
             job_id, run_id = job.id, run.id
             job_type = job.job_type
+
+        # 异步作业：领取已经完成（claim_next + start_run），执行交给驱动器。
+        async_handler = self._async_handlers.get(job_type)
+        if async_handler is not None and self._async_runner is not None:
+            self._async_runner.start(job_id=job_id, run_id=run_id, handler=async_handler)
+            self.processed += 1
+            return True
 
         handler = self._registry.get(job_type)
         if handler is None:

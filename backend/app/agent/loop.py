@@ -72,6 +72,10 @@ async def run_agent_loop(
                     _accumulate(tool_calls, chunk)
                 if chunk.finish_reason:
                     finish_reason = chunk.finish_reason
+                    # finish_reason 表示本轮生成已经结束。有些服务端不会主动
+                    # 关闭流（例如带心跳或连接复用的网关），继续读会一直挂住，
+                    # 用户看到的是"说完了但不继续"。拿到结束标记就停。
+                    break
         except ProviderError as exc:
             yield AgentEvent(kind="error", payload={"code": exc.code, "message": str(exc)})
             return
@@ -115,7 +119,16 @@ async def run_agent_loop(
         )
 
         for call in calls:
-            yield AgentEvent(kind="tool_start", payload={"id": call.id, "name": call.name})
+            # 带上工具自己的中文名，界面就不用维护一张会漂移的对照表（D-012）。
+            definition = broker.definition_of(call.name)
+            yield AgentEvent(
+                kind="tool_start",
+                payload={
+                    "id": call.id,
+                    "name": call.name,
+                    **({"display_name": definition.title} if definition is not None else {}),
+                },
+            )
             # Broker 是 async：写操作会在这里暂停、等待用户审批。
             result = await broker.execute(call.name, call.arguments, context, call_id=call.id)
             conversation.append(_tool_message(result))

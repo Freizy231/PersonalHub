@@ -10,20 +10,36 @@
 
 import type {
   ActivityList,
+  AppList,
+  GenerateAccepted,
+  InstallResult,
+  SettingsView,
+  StagedApp,
+  StagingList,
   ApiErrorBody,
   Approval,
   ApprovalList,
+  Capability,
+  CapabilityList,
+  CapabilityTypeList,
   Conversation,
   ConversationList,
+  DependencyHealth,
   HealthResponse,
   Job,
   JobDetail,
   JobList,
+  McpServerList,
   MemoryItem,
   MemoryList,
   Message,
+  Plugin,
+  PluginList,
+  PluginPreview,
   MessageList,
   Result,
+  UserTask,
+  UserTaskList,
 } from '../types/api'
 
 const API_PREFIX = '/api/v1'
@@ -146,10 +162,30 @@ export const api = {
       request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
     messages: {
-      list: (conversationId: string, limit = 200, offset = 0) =>
+      /**
+       * 列出消息。
+       *
+       * order='desc' 表示"从最新一条往回取"，items 仍按时间正序返回。
+       * 会话详情页必须用它：固定 offset=0 只能看到最早的 200 条，
+       * 超长会话里最新的消息反而看不见（D-012）。
+       */
+      list: (conversationId: string, limit = 200, offset = 0, order: 'asc' | 'desc' = 'asc') =>
         request<MessageList>(
           `/conversations/${encodeURIComponent(conversationId)}/messages` +
-            `?limit=${limit}&offset=${offset}`,
+            `?limit=${limit}&offset=${offset}&order=${order}`,
+        ),
+
+      /**
+       * 取更早的一页（长会话「加载更早」）。
+       *
+       * 用**游标**（当前最早一条的 id）而不是 offset：offset 从最新一条
+       * 往回数，期间若有新消息写入，同一个 offset 会指向别处，
+       * 表现为重复或跳过。游标锚定在"用户当前看到的最早一条"。
+       */
+      before: (conversationId: string, beforeId: string, limit = 100) =>
+        request<MessageList>(
+          `/conversations/${encodeURIComponent(conversationId)}/messages` +
+            `?limit=${limit}&order=desc&before=${encodeURIComponent(beforeId)}`,
         ),
 
       // 后端只接受 role="user"，这里也不发送 role，避免前端与后端契约漂移。
@@ -179,8 +215,161 @@ export const api = {
       request<Job>(`/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
   },
 
+  /**
+   * 用户任务（`tasks` 表，D-013）。
+   *
+   * 刻意与 `jobs` 分开命名与路径（`/user-tasks`）：两者是不同实体，
+   * 混在一个路径空间下正是此前界面把作业当任务的原因。
+   * 没有 create：任务只能由对话中的 `create_task` 经用户审批创建。
+   */
+  userTasks: {
+    list: (status?: 'OPEN' | 'DONE') => {
+      const params = new URLSearchParams()
+      if (status) params.set('status', status)
+      const qs = params.toString()
+      return request<UserTaskList>(`/user-tasks${qs ? `?${qs}` : ''}`)
+    },
+
+    complete: (id: string) =>
+      request<UserTask>(`/user-tasks/${encodeURIComponent(id)}/complete`, { method: 'POST' }),
+
+    reopen: (id: string) =>
+      request<UserTask>(`/user-tasks/${encodeURIComponent(id)}/reopen`, { method: 'POST' }),
+
+    remove: (id: string) =>
+      request<void>(`/user-tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  },
+
   activity: {
     list: (limit = 50) => request<ActivityList>(`/activity?limit=${limit}`),
+  },
+
+  /** 能力声明（M8）。只读：安装与调用需要单独的授权流程，不在此暴露。 */
+  plugins: {
+    list: () => request<PluginList>('/plugins'),
+
+    /** 安装前预览：来源、权限、依赖与风险（§8.5）。 */
+    preview: (directory: string) =>
+      request<PluginPreview>(`/plugins/preview?directory=${encodeURIComponent(directory)}`),
+
+    install: (directory: string) =>
+      request<Plugin>('/plugins/install', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ directory }),
+      }),
+
+    enable: (id: string) =>
+      request<Plugin>(`/plugins/${encodeURIComponent(id)}/enable`, { method: 'POST' }),
+
+    disable: (id: string) =>
+      request<Plugin>(`/plugins/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+
+    remove: (id: string) =>
+      request<{ ok: boolean; message: string }>(`/plugins/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+  },
+
+  mcp: {
+    /** 只读：MCP Server 的配置与状态。增删改需直接编辑配置文件并重启。 */
+    servers: () => request<McpServerList>('/mcp/servers'),
+  },
+
+  /**
+   * 生成的 Personal App（M9）。
+   *
+   * 预览与运行都通过 iframe 加载 `/apps/.../content`：那条路径带
+   * CSP `default-src 'none'` 等安全响应头，是应用唯一的运行方式。
+   * 这里刻意不取 HTML 文本再塞进 srcDoc——reason 见 AppsPage 注释。
+   */
+  apps: {
+    list: () => request<AppList>('/apps'),
+
+    /**
+     * 提交生成作业。**立即返回**（毫秒级），不等待模型。
+     *
+     * 刻意不设长超时：接口已经不再耗时，长超时只会掩盖真正的问题。
+     */
+    /**
+     * 提交生成作业。
+     *
+     * `force=false` 时，后端发现相似应用会**跳过生成**并返回 similar 清单，
+     * 由用户决定"用已有的"还是"仍然重新生成"。
+     */
+    generate: (prompt: string, force = false) =>
+      request<GenerateAccepted>('/apps/generate', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ request: prompt, force }),
+      }),
+
+    /**
+     * 一次生成的完整摘要（迭代 3）。
+     *
+     * 返回标题、用途、要素、版本预测与改动幅度；**不含 HTML**——
+     * 内容只经 `stagingContentUrl`（带 CSP）加载。
+     */
+    staged: (stagingId: string) =>
+      request<StagedApp>(`/apps/staging/${encodeURIComponent(stagingId)}`),
+
+    /**
+     * 尚未安装的生成结果（关掉页面后仍可找回）。
+     *
+     * 生成结果在用户点安装前一直在磁盘上（1 小时后才对清理）。
+     */
+    pending: () => request<StagingList>('/apps/staging'),
+
+    install: (stagingId: string) =>
+      request<InstallResult>(`/apps/staging/${encodeURIComponent(stagingId)}/install`, {
+        method: 'POST',
+      }),
+
+    discard: (stagingId: string) =>
+      request<{ ok: boolean; message: string }>(
+        `/apps/staging/${encodeURIComponent(stagingId)}`,
+        { method: 'DELETE' },
+      ),
+
+    rollback: (id: string) =>
+      request<InstallResult>(`/apps/${encodeURIComponent(id)}/rollback`, { method: 'POST' }),
+
+    remove: (id: string) =>
+      request<{ ok: boolean; message: string }>(`/apps/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+
+    /** iframe 的 src。不要 fetch 它再把结果塞进 srcDoc——见 AppsPage 注释。 */
+    contentUrl: (id: string) => `${API_PREFIX}/apps/${encodeURIComponent(id)}/content`,
+
+    stagingContentUrl: (stagingId: string) =>
+      `${API_PREFIX}/apps/staging/${encodeURIComponent(stagingId)}/content`,
+  },
+
+  capabilities: {
+    list: (options: { q?: string; type?: string; source?: string } = {}) => {
+      const params = new URLSearchParams()
+      if (options.q) params.set('q', options.q)
+      if (options.type) params.set('type', options.type)
+      if (options.source) params.set('source', options.source)
+      const qs = params.toString()
+      return request<CapabilityList>(`/capabilities${qs ? `?${qs}` : ''}`)
+    },
+
+    get: (id: string) => request<Capability>(`/capabilities/${encodeURIComponent(id)}`),
+
+    versions: (id: string) =>
+      request<CapabilityList>(`/capabilities/${encodeURIComponent(id)}/versions`),
+
+    /** 系统里实际存在的类型（只列出有数据的），用于渲染筛选下拉框。 */
+    types: () => request<CapabilityTypeList>('/capabilities/types'),
+
+    dependencyHealth: () => request<DependencyHealth>('/capabilities/health/deps'),
+  },
+
+  /** 系统设置（只读）：当前进程真正在用的配置。 */
+  settings: {
+    get: () => request<SettingsView>('/settings'),
   },
 
   approvals: {
@@ -208,9 +397,13 @@ export const api = {
   },
 
   memory: {
-    list: (status?: string, limit = 100, offset = 0) => {
-      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
-      if (status) params.set('status', status)
+    list: (options: { status?: string; q?: string; limit?: number; offset?: number } = {}) => {
+      const params = new URLSearchParams({
+        limit: String(options.limit ?? 100),
+        offset: String(options.offset ?? 0),
+      })
+      if (options.status) params.set('status', options.status)
+      if (options.q) params.set('q', options.q)
       return request<MemoryList>(`/memory?${params.toString()}`)
     },
 

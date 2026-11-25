@@ -40,6 +40,12 @@ class JobOut(BaseModel):
     available_at: str
     created_at: str
     updated_at: str
+    # 输入摘要：由后端从 payload 中提取**有限长度**的安全字段生成。
+    # 不返回原始 payload —— 它可能含完整用户描述，界面只需要一行摘要。
+    summary: str = ""
+    # 最近一次执行事件（阶段名 + 简短说明）。服务端没有时为空。
+    stage: str | None = None
+    stage_message: str | None = None
 
 
 class EventOut(BaseModel):
@@ -62,6 +68,10 @@ class RunOut(BaseModel):
     started_at: str
     finished_at: str | None
     error_code: str | None
+    # 成功后的结果摘要（例如生成应用得到的 staging_id 与标题）。
+    # 处理器写入的检查点本身就是"结果"，前端据此跳转，不必再查一次。
+    # 解析失败时置为 None，不让坏数据导致整个详情接口 500。
+    result: dict | None = None  # type: ignore[type-arg]
 
 
 class JobDetailOut(JobOut):
@@ -85,6 +95,49 @@ def _iso(value) -> str:  # type: ignore[no-untyped-def]
     return text if value.tzinfo else text + "Z"
 
 
+# payload 里允许展示给用户的字段。白名单而不是黑名单：
+# payload 可能含完整用户描述或将来新增的敏感字段，默认不展示才安全。
+SUMMARY_FIELDS: dict[str, tuple[str, ...]] = {
+    "generate_app": ("request",),
+}
+
+MAX_SUMMARY_CHARS = 120
+
+# 已结束的作业不再有"进行到哪一步"的概念。
+TERMINAL_STATUSES = frozenset(
+    {JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value}
+)
+
+
+def is_terminal(job_status: str) -> bool:
+    return job_status in TERMINAL_STATUSES
+
+
+def _summary_of(job: Job) -> str:
+    """从 payload 提取一行输入摘要。
+
+    只取白名单字段、截断到固定长度，并折叠空白——
+    活动/作业列表是元数据视图（§7.4），不是用户内容的展示处。
+    """
+    fields = SUMMARY_FIELDS.get(job.job_type)
+    if not fields:
+        return ""
+    data = _parse_result(job.payload)
+    if not data:
+        return ""
+    for name in fields:
+        value = data.get(name)
+        if not isinstance(value, str):
+            continue
+        text = " ".join(value.split())
+        if not text:
+            continue
+        if len(text) > MAX_SUMMARY_CHARS:
+            text = text[:MAX_SUMMARY_CHARS].rstrip() + "…"
+        return text
+    return ""
+
+
 def _job_out(job: Job) -> JobOut:
     return JobOut(
         id=job.id,
@@ -96,7 +149,24 @@ def _job_out(job: Job) -> JobOut:
         available_at=_iso(job.available_at),
         created_at=_iso(job.created_at),
         updated_at=_iso(job.updated_at),
+        summary=_summary_of(job),
     )
+
+
+def _latest_stages(session, job_ids: list[str]) -> dict[str, tuple[str, str]]:  # type: ignore[no-untyped-def]
+    """批量取每个作业的最近事件（阶段）。一次查询，避免 N+1。"""
+    if not job_ids:
+        return {}
+    events = session.scalars(
+        select(TaskEvent)
+        .where(TaskEvent.job_id.in_(job_ids))
+        .order_by(TaskEvent.job_id, TaskEvent.created_at.desc(), TaskEvent.id.desc())
+    )
+    latest: dict[str, tuple[str, str]] = {}
+    for event in events:
+        # 按 created_at 倒序，第一次见到的就是每个作业的最新一条。
+        latest.setdefault(event.job_id, (event.event_type, event.message))
+    return latest
 
 
 def _event_out(event: TaskEvent) -> EventOut:
@@ -108,6 +178,18 @@ def _event_out(event: TaskEvent) -> EventOut:
         message=event.message,
         created_at=_iso(event.created_at),
     )
+
+
+def _parse_result(checkpoint: str | None) -> dict | None:  # type: ignore[type-arg]
+    if not checkpoint:
+        return None
+    import json
+
+    try:
+        data = json.loads(checkpoint)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _require_job(session, job_id: str) -> Job:  # type: ignore[no-untyped-def]
@@ -128,7 +210,18 @@ async def list_jobs(
     if status_filter is not None:
         stmt = stmt.where(Job.status == status_filter.value)
     jobs = list(session.scalars(stmt.order_by(Job.created_at.desc()).limit(limit)))
-    return JobListOut(items=[_job_out(j) for j in jobs], total=len(jobs))
+
+    stages = _latest_stages(session, [job.id for job in jobs])
+    items: list[JobOut] = []
+    for job in jobs:
+        item = _job_out(job)
+        stage = stages.get(job.id)
+        # 已结束的作业不显示"阶段"：最后一次中间事件不是当前状态，
+        # 显示它会让人以为还在进行。
+        if stage is not None and not is_terminal(job.status):
+            item.stage, item.stage_message = stage
+        items.append(item)
+    return JobListOut(items=items, total=len(items))
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailOut, summary="作业详情")
@@ -147,6 +240,9 @@ async def get_job(job_id: str, session: SessionDep) -> JobDetailOut:
     )
 
     base = _job_out(job).model_dump()
+    if events and not is_terminal(job.status):
+        base["stage"] = events[-1].event_type
+        base["stage_message"] = events[-1].message
     return JobDetailOut(
         **base,
         runs=[
@@ -157,6 +253,7 @@ async def get_job(job_id: str, session: SessionDep) -> JobDetailOut:
                 started_at=_iso(r.started_at),
                 finished_at=_iso(r.finished_at) if r.finished_at else None,
                 error_code=r.error_code,
+                result=_parse_result(r.checkpoint),
             )
             for r in runs
         ],

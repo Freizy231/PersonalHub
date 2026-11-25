@@ -36,6 +36,11 @@ function formatTime(iso: string): string {
   return date.toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+/** 删除确认里引用的内容：过长会挤掉确认按钮，截断即可。 */
+function shorten(text: string, limit = 24): string {
+  return text.length > limit ? `${text.slice(0, limit)}…` : text
+}
+
 /**
  * 单条记忆卡片。
  *
@@ -131,6 +136,26 @@ export function MemoryCard({
         </p>
       )}
 
+      {memory.status !== 'PROPOSED' && memory.updated_at !== memory.created_at && (
+        <p className="memory__updated">最近修改：{formatTime(memory.updated_at)}</p>
+      )}
+
+      {memory.similar && memory.similar.length > 0 && memory.status === 'PROPOSED' && (
+        <div className="memory__similar" role="note">
+          <p className="memory__similar-title">
+            有 {memory.similar.length} 条待审核记忆与这条很像，可能是同一件事：
+          </p>
+          <ul>
+            {memory.similar.map((item) => (
+              <li key={item.id}>「{item.content}」</li>
+            ))}
+          </ul>
+          <p className="memory__similar-hint">
+            系统不会自动合并。如果确实是同一件事，拒绝其中一条即可。
+          </p>
+        </div>
+      )}
+
       {!editing && (
         <div className="memory__actions">
           {memory.status === 'PROPOSED' && (
@@ -163,34 +188,49 @@ export function MemoryCard({
               重新批准
             </button>
           )}
-          <button type="button" onClick={() => setEditing(true)} disabled={busy}>
-            修改
-          </button>
 
-          {confirmingDelete ? (
-            <>
-              <span className="memory__confirm">确定删除？</span>
-              <button
-                type="button"
-                className="danger"
-                onClick={() => void onDelete(memory.id)}
-                disabled={busy}
-              >
-                确认删除
-              </button>
-              <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}>
-                取消
-              </button>
-            </>
+          {memory.status === 'DELETED' ? (
+            // 已删除是终态：不能"恢复"（服务端把删除当作永久不可见），
+            // 也不再有修改入口——它不会进入任何上下文，编辑它没有意义。
+            <span className="memory__note">已删除，不会再出现在任何视图或对话中。</span>
           ) : (
-            <button
-              type="button"
-              className="danger"
-              onClick={() => setConfirmingDelete(true)}
-              disabled={busy}
-            >
-              删除
-            </button>
+            <>
+              <button type="button" onClick={() => setEditing(true)} disabled={busy}>
+                修改
+              </button>
+
+              {confirmingDelete ? (
+                <>
+                  <span className="memory__confirm">
+                    确定删除「{shorten(memory.content)}」？删除后 AI 不会再使用它。
+                  </span>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => void onDelete(memory.id)}
+                    disabled={busy}
+                  >
+                    确认删除
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={busy}
+                  >
+                    取消
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={busy}
+                >
+                  删除
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

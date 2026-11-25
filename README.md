@@ -33,6 +33,12 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - 消息 API：`GET/POST /api/v1/conversations/{id}/messages`，客户端只能创建 `role="user"`
 - 前端路由：总览 / 会话列表 / 会话详情；支持刷新、后退与不存在会话的友好提示
 - 会话详情支持 Enter 发送、Shift+Enter 换行、多行缩进保留、中文输入法组合保护
+- 发送后输入框立即清空；生成期间仍可继续输入下一句（D-012）
+- AI 回复按 Markdown 渲染（标题、列表、表格、代码块）；用户消息保持纯文本
+- 工具调用与审批卡片出现在当前对话位置，而不是固定在会话顶部
+- 审批卡片显示中文标签（「标题：…」「说明：…」）与剩余有效时间，
+  原始参数默认折叠，需要核对时再展开
+- 点"停止生成"会真正停止后端生成（不再继续消耗额度），并作废悬挂的审批
 - 数据库位于 `~/.local/share/personal-hub/db/`，不在源码仓库内
 
 ### 已完成（M3）
@@ -75,6 +81,245 @@ Local-first、用户拥有和控制的个人 AI 环境。数据默认留在本�
 - **重启恢复**：服务重启后未完成作业重新排队；执行实例标记为"被中断"而非谎称失败
 - **任务中心**：按状态筛选，支持取消、重试，有进行中任务时自动刷新
 - **活动中心**：全局事件时间线 + 单个任务详情（每次尝试、错误码、时间）
+
+### 已完成（M8 第一阶段）
+
+- **统一 Capability Manifest**：按规范 §7.2 描述每种能力（id、版本、类型、
+  输入输出 Schema、运行时、声明权限、依赖、来源、签名）
+- **能力注册表**：登记、按版本检索、列全部版本；版本按数字比较（1.10 > 1.9）
+- **依赖检查**：报告缺失依赖与依赖环；有依赖者时拒绝卸载
+- **能力页**（导航「能力」）：列出系统已有的能力，可搜索、按类型筛选、
+  展开参数结构
+- **声明不等于授权**：页面上明确标注"声明，非授权"，写操作仍需你确认
+- WASM 评估已完成，结论是暂不引入（见 [`docs/EVALUATION_WASM.md`](docs/EVALUATION_WASM.md)）
+
+#### 插件（进程）
+
+进程插件在 **bubblewrap 沙箱**里运行你自己写的 Python 脚本，
+用于声明式插件做不到的事（读写自有数据、复杂计算等）。
+
+`plugin.json`：
+
+```json
+{
+  "id": "com.example.echo",
+  "name": "回声插件",
+  "version": "1.0.0",
+  "type": "process",
+  "description": "在沙箱里回显内容",
+  "entrypoint": "run.py",
+  "limits": { "memory_mb": 256, "cpu_seconds": 5, "timeout_seconds": 15 },
+  "tools": [
+    {
+      "name": "echo",
+      "display_name": "沙箱回声",
+      "description": "返回你提供的文本",
+      "input_schema": {
+        "type": "object",
+        "properties": { "text": { "type": "string" } },
+        "required": ["text"]
+      },
+      "argument_labels": [["text", "内容"]]
+    }
+  ]
+}
+```
+
+`run.py`（从 stdin 读参数，向 stdout 写结果）：
+
+```python
+import json, sys
+
+payload = json.loads(sys.stdin.read() or "{}")
+args = payload.get("arguments", {})
+print(json.dumps({"ok": True, "content": f"回声：{args.get('text', '')}"},
+                 ensure_ascii=False))
+```
+
+沙箱里插件**做不了**什么（均经实测验证）：
+
+| 限制 | 说明 |
+|---|---|
+| 读用户文件 | 主目录、数据库目录、`~/.ssh` 全部不可见 |
+| 联网 | 无网络命名空间，出站连接被阻断 |
+| 写自己的包 | 插件目录只读 |
+| 占满 CPU | `cpu_seconds` 到点被杀死 |
+| 吃光内存 | 超过 `memory_mb` 立即 `MemoryError` |
+| 拿到密钥 | 环境变量只传 `PATH`/`LANG`/`TERM` |
+| 写临时文件 | 可写 `/work`，进程退出即消失 |
+
+- **沙箱不可用时拒绝运行**（不会退化成无沙箱执行）。
+- 进程插件**一律需要确认**，预览里标为"需要确认（执行外部代码）"。
+- 每次调用启动一个全新沙箱，调用结束即退出；超时或取消会杀掉进程，
+  不会留下孤儿。
+- 需要系统已安装 `bubblewrap` 与 `util-linux`（提供 `prlimit`）。
+  缺失时「插件」页会显示原因，声明式插件不受影响。
+
+#### 插件（声明式）
+
+插件可以把你常用的工具组合固定下来。**本期插件不含任何可执行代码**，
+只是"依次调用哪些已有工具"的声明。
+
+安装步骤：
+
+```bash
+# 1. 把插件目录放进导入目录
+mkdir -p ~/.local/share/personal-hub/plugin-import/notes-plugin
+# 2. 写入 plugin.json（见下）
+# 3. 打开「插件」页 → 填目录名 → 预览 → 确认安装 → 启用
+```
+
+`plugin.json` 示例：
+
+```json
+{
+  "id": "com.example.notes",
+  "name": "笔记助手",
+  "version": "1.0.0",
+  "type": "declarative",
+  "description": "把文本整理成一条任务",
+  "permissions": ["task:write"],
+  "tools": [
+    {
+      "name": "make_todo",
+      "display_name": "生成任务",
+      "description": "把一段文本创建为任务",
+      "input_schema": {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"]
+      },
+      "composes": ["builtin.create_task"],
+      "argument_labels": [["title", "标题"]]
+    }
+  ]
+}
+```
+
+规则与安全约定：
+
+| 项 | 要求 |
+|---|---|
+| `id` | 反向域名形式，如 `com.example.notes` |
+| `type` | 只能是 `declarative`（`process` 本期不支持，会明确报错） |
+| `composes` | 只能引用**内建工具**（`builtin.list_tasks` 等），不能引用插件或 MCP |
+| 安装来源 | 只从数据目录的 `plugin-import/<目录名>` 读取，**不接受任意路径** |
+| 默认状态 | 安装后**不启用**，需手动开启 |
+
+- **批准外层不等于批准内层**：调用组合工具时，内部每个写操作都会
+  **单独再要一次确认**。实测会连续弹出两次审批。
+- 组合工具的风险 = 所组合工具中的最高风险（含写操作就需要确认）。
+- 卸载**保留文件**（重命名为 `.<id>.uninstalled`），可手动删除。
+- 安装时拒绝包含符号链接的目录。
+
+#### 外部 MCP 服务
+
+可以通过 MCP 协议接入外部工具。**默认全部关闭**，需要你显式配置并重启服务。
+
+配置文件：`~/.local/share/personal-hub/mcp/servers.json`
+
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+      "enabled": true,
+      "timeout_seconds": 30
+    }
+  ]
+}
+```
+
+| 项 | 说明 |
+|---|---|
+| `name` | 小写字母开头，会成为工具名前缀（`mcp__<name>__<tool>`） |
+| `transport` | `stdio`（本地子进程）或 `http`（远程，需 `url`） |
+| `command` | 白名单命令名，或**已存在的绝对路径** |
+| `enabled` | **默认 false**，必须显式打开 |
+| `token_env` | 仅 http：存放 Bearer Token 的**环境变量名**（不写 Token 本身） |
+
+安全约定（都已在测试中锁定）：
+
+- **MCP 工具一律需要你逐次确认**。外部服务自称的"只读"不会被采信。
+- 子进程**不继承**本服务的环境变量——模型 API Key 不会传给外部 Server。
+- 子进程工作目录固定在 `mcp/<name>/`，不在你的主目录或源码仓库里。
+- 工具描述来自外部服务，会明确标注"不可信";结果超过 8,000 字符会截断。
+- 配置里不能写 `risk` 字段：不允许把外部工具降级成免审批。
+- Server 连不上只影响它自己，内建功能照常；原因可在「能力」页看到。
+
+#### 技能（Skills）
+
+把常用的工作方法写成一份 Markdown，AI 在任务匹配时会参考它。
+技能**只是文字**，不执行任何代码，也不会自己获得任何权限。
+
+```bash
+mkdir -p ~/.local/share/personal-hub/skills/weekly-report
+cat > ~/.local/share/personal-hub/skills/weekly-report/SKILL.md <<'SKILL'
+---
+name: 周报写作
+description: 按公司模板写周报
+version: 1.0.0
+---
+
+# 周报结构
+
+1. 本周进展（3 条）
+2. 遇到的问题
+3. 下周计划
+SKILL
+```
+
+格式规则（写错会在启动日志里提示具体原因，其他技能不受影响）：
+
+| 项 | 要求 |
+|---|---|
+| 目录名 | 即技能 id：小写字母、数字、`_`、`-` |
+| frontmatter | 必须用 `---` 包住，每行 `key: 值`，只支持 `name` / `description` / `version` |
+| 必需字段 | `name`、`description`（`version` 缺省为 1.0.0） |
+| 正文 | Markdown，上限 32,000 字符 |
+
+- 系统提示里只放技能名与一句话描述；AI 需要时再加载全文，不挤占上下文。
+- **修改技能后需重启服务**（启动时加载一次，保证对话中清单与内容一致）。
+- 写坏的技能会被跳过并在日志里说明原因，在「能力」页看不到它。
+- 能力页的「技能」类型下可以看到已加载的技能。
+
+#### 应用（Personal App）
+
+用一句话描述想要的页面，系统生成一个**单文件小应用**，预览确认后安装。
+这是 M9 的能力，入口在「应用」页。
+
+能做什么：只读展示（清单、卡片、图表）与纯前端计算（计算器、计时器）。
+**不能**联网、保存数据、读文件、登录——v1 刻意只做第 1 级复杂度。
+
+生成是**后台作业**：提交后立刻返回，用户可以离开页面或刷新，
+回来时结果仍在「应用」页。进度与取消也可以在「活动」页操作。
+
+生成的限制与保证：
+
+| 环节 | 行为 |
+|---|---|
+| 需求解析 | 逐字段校验；超范围（联网/保存数据/登录/上传）在调用模型前就拒绝 |
+| 生成 | 模型输出视为不可信数据；**通过检查才落盘** |
+| 静态检查 | 禁网络 API、外链资源、iframe/form、cookie/storage、eval、`on*` 内联处理器 |
+| 运行 | 不透明来源 iframe（`sandbox="allow-scripts"`）+ CSP `default-src 'none'` |
+| 安装 | 先写新版本再切指针；失败时旧版本继续可用；可回滚；卸载保留目录 |
+
+静态检查基于文本匹配，**可能被绕过**（`window['fe'+'tch']` 之类），
+所以浏览器那一层才是真正的边界。两者独立，可各自验证。
+
+验证沙箱边界（需要 Node ≥ 22 与 Edge/Chrome/Chromium）：
+
+```bash
+# 先安装一个应用，然后：
+node scripts/verify-app-sandbox.mjs --origin http://127.0.0.1:5173 --app-id <应用 id>
+```
+
+它以无头浏览器打开「应用」页，进入应用自己的执行上下文实测越界尝试：
+父页面读取、`localStorage`、`cookie`、`fetch` 必须全部被拦。
+失败时退出码为 1——**边界被突破就不能发布**。
 
 ### 配置
 
@@ -133,6 +378,8 @@ cd backend && uv run python scripts/diagnose_model.py
 | M5 | Agent Loop 与只读工具 | 已完成 |
 | M6 | 治理与审批 | 已完成 |
 | M7 | 持久化任务运行时 | 已完成 |
+| M8 | 能力运行时（Capability Runtime） | 功能已完成（WASM 评估：暂不引入） |
+| M9 | System Builder（自然语言创建应用） | **已完成** |
 
 ## 开发环境要求
 
@@ -175,18 +422,57 @@ cd frontend && npm run dev
 ## 验证与测试
 
 ```bash
-# 后端测试（361 项：健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
-# workspace 隔离、role 伪造防护、流式对话、取消语义、外发审计、代理处理、
-# 记忆提取/审核/注入隔离/去重、Agent 循环、工具 Broker、参数校验、
-# 审批绑定/过期/一次性消费/越权、Policy 决策、作业队列/重试/恢复/Worker）
+# 后端测试（健康检查、错误结构、CORS、配置、日志脱敏、会话/消息 CRUD、
+# workspace 隔离、role 伪造防护、流式对话、取消语义（含断开即停止生成）、
+# 历史取尾部、外发审计、代理处理、记忆提取/审核/注入隔离/去重、Agent 循环、
+# 工具 Broker、参数校验、审批人话摘要、审批绑定/过期/一次性消费/越权、
+# Policy 决策、作业队列/重试/恢复/Worker、
+# 能力 Manifest 校验/版本排序/依赖环/声明非授权/只读 API、
+# 技能解析/校验/不执行代码/路径穿越防护/对话注入、
+# MCP 配置校验/命令白名单/失败隔离/一律 WRITE/代理链路/不可信标注、
+# 插件清单校验/组合风险传播/双层审批/路径逃逸/卸载保留目录、
+# 进程插件重启后仍为 WRITE（审计 P0-1 回归）、
+# 沙箱隔离（真实 bwrap：主目录/网络/只读/CPU/内存/密钥）、
+# 生成应用静态检查（14 条禁项）/版本管理/原子安装/回滚、
+# 用户任务 API 与任务/作业隔离、作业输入摘要白名单、任务来源审批追溯）
 cd backend && uv run pytest -q
 cd backend && uv run ruff check . && uv run ruff format --check .
 
-# 前端：严格类型检查 + 生产构建 + lint
-cd frontend && npm run build && npm run lint
+# 前端：严格类型检查 + 生产构建 + lint + 组件测试
+cd frontend && npm run build && npm run lint && npm test
 
 # 接口连通性
 curl -fsS http://127.0.0.1:8000/api/v1/health
+```
+
+浏览器走查（需要 Node ≥ 22 与 Edge/Chrome/Chromium；前后端已启动）：
+
+```bash
+# 首页工作台 / 我的任务 / 后台作业 / 活动 在桌面 1280 与窄屏 390 下的
+# 控制台错误、网络失败、横向溢出，并输出截图
+node scripts/verify-workbench.mjs --origin http://127.0.0.1:5173 --out /tmp/ph-shots
+
+# 用户任务闭环（标记完成 → 刷新仍完成 → 重新打开 → 两段确认删除 → 筛选视图）
+node scripts/verify-task-closure.mjs --origin http://127.0.0.1:5173
+
+# 记忆中心四视图、搜索、近似候选提示
+node scripts/verify-memory-approval.mjs --origin http://127.0.0.1:5173
+
+# 长会话「加载更早」：游标分页、无重复、阅读位置不跳变
+node scripts/verify-conversation-paging.mjs --origin http://127.0.0.1:5173 \
+  --long-id <长会话 id> --short-id <短会话 id>
+
+# 对话失败状态：可重试给「重试」，配置类错误不给（用不可达地址，零外发）
+node scripts/verify-send-state.mjs --origin http://127.0.0.1:5173 \
+  --conversation-id <会话 id> --expect retryable
+
+# 应用创建流程（零外发：脚本化 Provider 起后端，再起前端指向它）
+cd backend && uv run python ../scripts/verify_app_flow.py --port 8030 --data-dir /tmp/ph-appflow &
+cd frontend && PH_BACKEND_ORIGIN=http://127.0.0.1:8030 npm run dev -- --port 5204 &
+node scripts/verify-app-flow.mjs --origin http://127.0.0.1:5204
+
+# 能力页：类型筛选只列有数据的类型、风险级别、无 Markdown 泄漏
+node scripts/verify-capability-page.mjs --origin http://127.0.0.1:5173
 ```
 
 首次运行或升级后需要建立/更新表结构：
